@@ -30,7 +30,10 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Automated Question Paper Generator")
 
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "https://question-paper-generator-green.vercel.app",
+]
 
 app.add_middleware(
     CORSMiddleware,
