@@ -1,0 +1,20 @@
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/.env
+backend/qpg.db
+backend/uploads/
+backend/generated_papers/
+backend/logos/
+backend/templates/
+backend/avatars/
+*.pyc
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# OS
+.DS_Store
+Thumbs.db
