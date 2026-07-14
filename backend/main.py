@@ -30,10 +30,8 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Automated Question Paper Generator")
 
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "https://question-paper-generator-green.vercel.app",
-]
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").strip().lower()
 
 app.add_middleware(
     CORSMiddleware,
@@ -210,6 +208,30 @@ def _user_dict(user: models.User) -> dict:
     }
 
 
+def _sync_owner_role(db: Session):
+    """If an OWNER_EMAIL is configured, make sure that account is admin —
+    and demote anyone else who accidentally ended up admin (e.g. because
+    they registered first on a fresh/redeployed database by coincidence).
+    Runs on every login and session check, so it self-heals automatically."""
+    if not OWNER_EMAIL:
+        return
+    changed = False
+    owner = db.query(models.User).filter(models.User.email == OWNER_EMAIL).first()
+    if owner and owner.role != "admin":
+        owner.role = "admin"
+        changed = True
+
+    stray_admins = db.query(models.User).filter(
+        models.User.role == "admin", models.User.email != OWNER_EMAIL
+    ).all()
+    for u in stray_admins:
+        u.role = "teacher"
+        changed = True
+
+    if changed:
+        db.commit()
+
+
 def _dispatch_otp(email: str, name: str, otp: str) -> str:
     """Tries to actually email the OTP. Falls back to printing it in the
     backend terminal if Gmail isn't configured (or sending fails), so the
@@ -270,6 +292,8 @@ def verify_otp(req: VerifyOtpRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
+    _sync_owner_role(db)
+    db.refresh(user)
     token = auth.create_access_token(user.id, user.email)
     return {"access_token": token, "user": _user_dict(user)}
 
@@ -323,12 +347,16 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         message = _dispatch_otp(user.email, user.name, otp)
         return {"otp_required": True, "email": user.email, "message": message}
 
+    _sync_owner_role(db)
+    db.refresh(user)
     token = auth.create_access_token(user.id, user.email)
     return {"access_token": token, "user": _user_dict(user)}
 
 
 @app.get("/auth/me")
-def get_me(current_user: models.User = Depends(auth.get_current_user)):
+def get_me(current_user: models.User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    _sync_owner_role(db)
+    db.refresh(current_user)
     return _user_dict(current_user)
 
 
@@ -377,6 +405,8 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
+    _sync_owner_role(db)
+    db.refresh(user)
     token = auth.create_access_token(user.id, user.email)
     return {"access_token": token, "user": _user_dict(user)}
 
