@@ -30,7 +30,7 @@ export default function RecentPapers() {
         const statusLabel = isReady ? "Ready" : "Draft";
         return (
           <div key={p.id}
-            className="grid items-center py-4 px-1 rounded-lg transition-colors"
+            className="flex flex-col sm:grid sm:items-center gap-1.5 sm:gap-0 py-4 px-1 rounded-lg transition-colors"
             style={{ gridTemplateColumns: "1fr 140px 100px", borderTop: "1px solid var(--surface-border-soft)" }}
             onMouseEnter={(e) => e.currentTarget.style.background = "var(--row-hover)"}
             onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
@@ -41,14 +41,17 @@ export default function RecentPapers() {
                 {p.version > 1 ? `v${p.version} · ` : ""}{p.file_type?.toUpperCase()}
               </p>
             </div>
-            <div className="font-sans text-[13px]" style={{ color: "var(--text-faint)" }}>
-              {new Date(p.created_at).toLocaleDateString(undefined, { month: "short", day: "2-digit", year: "numeric" })}
-            </div>
-            <div className="justify-self-start">
+            <div className="flex items-center gap-2 sm:block">
+              <span className="font-sans text-[13px] sm:hidden" style={{ color: "var(--text-faint)" }}>
+                {new Date(p.created_at).toLocaleDateString(undefined, { month: "short", day: "2-digit", year: "numeric" })}
+              </span>
               <span className="font-sans text-[11.5px] font-semibold px-3 py-[5px] rounded-full"
                 style={{ background: statusBg, color: statusColor }}>
                 {statusLabel}
               </span>
+            </div>
+            <div className="hidden sm:block font-sans text-[13px]" style={{ color: "var(--text-faint)" }}>
+              {new Date(p.created_at).toLocaleDateString(undefined, { month: "short", day: "2-digit", year: "numeric" })}
             </div>
           </div>
         );

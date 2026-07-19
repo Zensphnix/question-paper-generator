@@ -9,7 +9,7 @@ export default function Hero({ bloomCounts, coveragePct }) {
   const { t } = useLanguage();
 
   return (
-    <div className="relative overflow-hidden grid md:grid-cols-[1fr_260px] items-center rounded-[20px] p-11"
+    <div className="relative overflow-hidden grid md:grid-cols-[1fr_260px] items-center rounded-[20px] p-6 sm:p-8 md:p-11"
       style={{
         background: "linear-gradient(150deg,#12181f,#1a2230)",
         border: "1px solid rgba(255,255,255,0.06)",
