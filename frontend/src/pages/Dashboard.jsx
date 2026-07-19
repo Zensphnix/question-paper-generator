@@ -31,7 +31,7 @@ export default function Dashboard() {
   const sparkline = stats ? stats.daily_counts.map((d) => d.count) : [];
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-4 sm:space-y-7">
       <m.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
         <Hero bloomCounts={stats?.bloom_counts} coveragePct={stats?.bloom_coverage_pct} />
       </m.div>
@@ -46,7 +46,7 @@ export default function Dashboard() {
         variants={container}
         initial="hidden"
         animate="show"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5"
+        className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5"
       >
         <m.div variants={item}>
           <StatCard icon={UploadCloud} label={t("topicsCovered")} value={stats?.total_topics ?? "—"} swatch="amber" />
@@ -70,7 +70,7 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.25 }}
-        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+        className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6"
       >
         <div className="lg:col-span-2">
           <AnalyticsChart data={stats?.daily_counts ?? []} />

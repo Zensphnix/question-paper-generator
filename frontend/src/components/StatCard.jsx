@@ -36,7 +36,7 @@ export default function StatCard({ icon: Icon, label, value, swatch = "gold" }) 
     <m.div
       whileHover={{ y: -3, boxShadow: "0 16px 32px -12px rgba(28,26,23,0.14)" }}
       transition={{ type: "spring", stiffness: 320, damping: 24 }}
-      className="rounded-2xl p-6"
+      className="rounded-2xl p-4 sm:p-6"
       style={{ background: "var(--surface)", border: "1px solid var(--surface-border)", boxShadow: "0 1px 2px rgba(28,26,23,0.03)" }}
     >
       <div className="w-[38px] h-[38px] rounded-[10px] flex items-center justify-center mb-5"

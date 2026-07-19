@@ -27,8 +27,11 @@ def _make_page_decorator(watermark_text=None, qr_image_path=None):
         canvas.restoreState()
         if qr_image_path and os.path.exists(qr_image_path):
             try:
-                canvas.drawImage(qr_image_path, doc.pagesize[0] - 25 * mm, 12 * mm,
-                                  width=16 * mm, height=16 * mm, mask="auto")
+                # Top-right, clear of the header text and safely away from the
+                # table below it — bottom-right previously collided with the
+                # answer table's border since table height varies per paper.
+                canvas.drawImage(qr_image_path, doc.pagesize[0] - 24 * mm, doc.pagesize[1] - 24 * mm,
+                                  width=14 * mm, height=14 * mm, mask="auto")
             except Exception:
                 pass
     return _decorate
