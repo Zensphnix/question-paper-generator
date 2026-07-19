@@ -1,35 +1,33 @@
 import { NavLink } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard,
-  UploadCloud,
-  FileText,
-  FolderOpen,
-  BookOpen,
-  LifeBuoy,
-  ShieldCheck,
-  Settings,
-  Moon,
-  Sun,
-  Sparkles,
-  X,
+  LayoutDashboard, UploadCloud, FileText, FolderOpen, BookOpen,
+  LifeBuoy, ShieldCheck, Settings, Moon, Sun, X, ChevronDown,
 } from "lucide-react";
-import { useLanguage } from "../context/LanguageContext.jsx";
+import { useLanguage } from "../context/useLanguage.js";
 import { resolveAvatarUrl } from "../services/api.js";
+import SealMark from "./SealMark.jsx";
 
 function initials(name) {
   if (!name) return "?";
   return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
 }
 
-function Avatar({ user, size = "w-8 h-8" }) {
+function Avatar({ user }) {
   const src = resolveAvatarUrl(user?.avatar_url);
-  if (src) {
-    return <img src={src} alt="" className={`${size} rounded-full object-cover shrink-0`} />;
-  }
   return (
-    <div className={`${size} rounded-full bg-gradient-to-br from-violet-400 to-fuchsia-400 flex items-center justify-center text-xs font-semibold text-white shrink-0`}>
-      {initials(user?.name)}
+    <div className="relative shrink-0">
+      <div className="w-[34px] h-[34px] rounded-full p-[1.5px]" style={{ background: "linear-gradient(135deg,#e8cd93,#7a3340)" }}>
+        {src ? (
+          <img src={src} alt="" className="w-full h-full rounded-full object-cover" />
+        ) : (
+          <div className="w-full h-full rounded-full flex items-center justify-center font-sans text-[12.5px] font-bold"
+            style={{ background: "#3a2b1c", color: "#f3ede2" }}>
+            {initials(user?.name)}
+          </div>
+        )}
+      </div>
+      <div className="absolute -bottom-px -right-px w-[9px] h-[9px] rounded-full" style={{ background: "#5ab98a", border: "2px solid #0e131b" }} />
     </div>
   );
 }
@@ -49,61 +47,61 @@ export default function Sidebar({ darkMode, onToggleDark, user, isOpen, onClose 
   ];
 
   const content = (
-    <>
+    <div className="flex flex-col h-full px-5 py-7" style={{ background: "#0e131b" }}>
       {/* Brand */}
-      <div className="px-5 py-5 flex items-center justify-between border-b border-white/10">
+      <div className="flex items-center justify-between gap-3 mb-8 px-1.5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
-            <Sparkles size={18} className="text-white" />
-          </div>
-          <div className="leading-tight">
-            <p className="text-white font-semibold text-sm">QPaper AI</p>
-            <p className="text-[11px] text-slate-500">Premium Workspace</p>
-          </div>
+          <SealMark size={36} radius={11} />
+          <span className="font-serif text-base" style={{ color: "#f3ede2" }}>
+            QPaper <em className="italic" style={{ color: "#d4b876" }}>AI</em>
+          </span>
         </div>
-        {/* Close button — mobile only */}
-        <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white p-1">
+        <button type="button" onClick={onClose} aria-label="Close menu" className="md:hidden p-1" style={{ color: "#9aa0ac" }}>
           <X size={20} />
         </button>
       </div>
 
-      {/* User */}
-      <div className="mx-4 mt-4 mb-2 px-3 py-3 rounded-xl bg-white/5 flex items-center gap-3">
+      {/* Account card */}
+      <div className="flex items-center gap-3 rounded-xl px-3 py-[11px] mb-[26px] cursor-pointer transition-all"
+        style={{ background: "linear-gradient(135deg,rgba(184,147,76,0.08),rgba(255,255,255,0.03))", border: "1px solid rgba(184,147,76,0.18)" }}
+      >
         <Avatar user={user} />
-        <div className="leading-tight min-w-0">
-          <p className="text-white text-sm font-medium truncate">{user?.name || "..."}</p>
-          <p className="text-[11px] text-slate-500 capitalize">{user?.role || ""}</p>
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <p className="font-sans text-[13.5px] font-semibold truncate" style={{ color: "#f3ede2" }}>{user?.name || "..."}</p>
+          <p className="font-sans text-[11.5px] truncate capitalize" style={{ color: "#8a8f9a" }}>{user?.role || ""}</p>
         </div>
+        <ChevronDown size={13} className="shrink-0" style={{ color: "#6d7280" }} />
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 mt-2 space-y-1 overflow-y-auto">
+      <nav className="flex flex-col gap-0.5 flex-1 overflow-y-auto">
         {navItems.map(({ to, label, icon: Icon, end }) => (
-          <motion.div key={to} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
-            <NavLink
-              to={to}
-              end={end}
-              onClick={onClose}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? "bg-violet-600 text-white shadow-lg shadow-violet-900/40"
-                    : "text-slate-400 hover:bg-white/5 hover:text-white"
-                }`
-              }
-            >
-              <Icon size={17} />
-              {label}
-            </NavLink>
-          </motion.div>
+          <NavLink key={to} to={to} end={end} onClick={onClose}>
+            {({ isActive }) => (
+              <m.div
+                whileHover={!isActive ? { backgroundColor: "rgba(255,255,255,0.04)" } : {}}
+                transition={{ duration: 0.15 }}
+                className="flex items-center gap-3 pl-[13px] pr-3.5 py-[11px] rounded-[9px] font-sans text-sm cursor-pointer"
+                style={{
+                  borderLeft: isActive ? "2px solid #b8934c" : "2px solid transparent",
+                  background: isActive ? "rgba(184,147,76,0.12)" : "transparent",
+                  color: isActive ? "#f3ede2" : "#9aa0ac",
+                  fontWeight: isActive ? 600 : 400,
+                }}
+              >
+                <Icon size={16} style={{ color: isActive ? "#d4b876" : "currentColor" }} />
+                {label}
+              </m.div>
+            )}
+          </NavLink>
         ))}
       </nav>
 
       {/* Footer */}
-      <div className="p-4 space-y-3 border-t border-white/10">
-        <button
-          onClick={onToggleDark}
-          className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/5 text-slate-300 text-sm hover:bg-white/10 transition"
+      <div className="flex flex-col gap-2.5 mt-auto pt-4">
+        <button type="button" onClick={onToggleDark}
+          className="flex items-center justify-between px-3.5 py-[11px] rounded-[9px] font-sans text-[13px] transition"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", color: "#9aa0ac" }}
         >
           <span className="flex items-center gap-2">
             {darkMode ? <Sun size={15} /> : <Moon size={15} />}
@@ -111,40 +109,39 @@ export default function Sidebar({ darkMode, onToggleDark, user, isOpen, onClose 
           </span>
         </button>
 
-        <div className="px-3 py-3 rounded-xl bg-gradient-to-br from-violet-600/20 to-fuchsia-600/20 border border-violet-500/20">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <p className="text-xs font-medium text-white">{t("aiReady")}</p>
+        <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-[9px]"
+          style={{ background: "rgba(184,147,76,0.08)", border: "1px solid rgba(184,147,76,0.2)" }}>
+          <span className="w-[7px] h-[7px] rounded-full shrink-0" style={{ background: "#5ab98a" }} />
+          <div>
+            <p className="font-sans text-[12.5px] font-semibold" style={{ color: "#f3ede2" }}>{t("aiReady")}</p>
+            <p className="font-sans text-[11px]" style={{ color: "#7d8290" }}>Online · v1.3.0</p>
           </div>
-          <p className="text-[11px] text-slate-400">Online · v1.3.0</p>
         </div>
       </div>
-    </>
+    </div>
   );
 
   return (
     <>
-      {/* Desktop: static, always visible */}
-      <aside className="hidden md:flex w-64 shrink-0 bg-slate-950 text-slate-300 flex-col h-screen sticky top-0">
+      <aside className="hidden md:flex shrink-0 flex-col h-screen sticky top-0" style={{ width: 260, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
         {content}
       </aside>
 
-      {/* Mobile: off-canvas drawer */}
       <AnimatePresence>
         {isOpen && (
           <>
-            <motion.div
+            <m.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={onClose}
               className="md:hidden fixed inset-0 bg-black/50 z-40"
             />
-            <motion.aside
+            <m.aside
               initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
               transition={{ type: "tween", duration: 0.2 }}
-              className="md:hidden fixed inset-y-0 left-0 w-72 max-w-[80vw] bg-slate-950 text-slate-300 flex flex-col z-50"
+              className="md:hidden fixed inset-y-0 left-0 w-72 max-w-[80vw] flex flex-col z-50"
             >
               {content}
-            </motion.aside>
+            </m.aside>
           </>
         )}
       </AnimatePresence>

@@ -1,35 +1,33 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { translations } from "../i18n.js";
-
-const LanguageContext = createContext(null);
+import LanguageContext from "./languageContextInstance.js";
 
 export function LanguageProvider({ children }) {
-  const [lang, setLangState] = useState(() => localStorage.getItem("uiLang") || "en");
+  const [lang, setLang] = useState(() => localStorage.getItem("uiLang") || "en");
 
   useEffect(() => {
     localStorage.setItem("uiLang", lang);
   }, [lang]);
 
-  function setLang(newLang) {
-    setLangState(newLang);
-  }
+  const t = useCallback(
+    (key) => translations[lang]?.[key] ?? translations.en[key] ?? key,
+    [lang]
+  );
 
-  function t(key) {
-    return translations[lang]?.[key] ?? translations.en[key] ?? key;
-  }
-
-  // "AI generation language" — full language name, sent straight into the AI prompt
   const generationLanguage = lang === "hi" ? "Hindi" : "English";
 
+  // Every component that calls useLanguage() re-renders whenever this value's
+  // identity changes — without useMemo, that was EVERY render of the app root,
+  // regardless of whether lang actually changed. Now it only changes when lang
+  // (and therefore t/generationLanguage, which are derived from it) actually does.
+  const value = useMemo(
+    () => ({ lang, setLang, t, generationLanguage }),
+    [lang, setLang, t, generationLanguage]
+  );
+
   return (
-    <LanguageContext.Provider value={{ lang, setLang, t, generationLanguage }}>
+    <LanguageContext.Provider value={value}>
       {children}
     </LanguageContext.Provider>
   );
-}
-
-export function useLanguage() {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) throw new Error("useLanguage must be used inside LanguageProvider");
-  return ctx;
 }

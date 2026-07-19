@@ -1,13 +1,20 @@
 import os
 import json
+import random
 import shutil
+import io
+import csv
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -17,18 +24,23 @@ import models
 import auth
 from services.pdf_parser import extract_text
 from services.topic_extractor import extract_topics
-from services.ai_generator import generate_questions, generate_mixed_questions
+from services.ai_generator import generate_questions, generate_mixed_questions, generate_mcq_questions
 from services.bloom_classifier import classify_question
 from services.validator import remove_duplicates, validate_against_existing
-from services.pdf_export import build_pdf
+from services.pdf_export import build_pdf, build_university_pdf
 from services.docx_export import build_docx_from_template, has_placeholder
 from services.email_service import send_otp_email, send_email_with_attachment, is_configured as email_configured
+from services.diagram_generator import build_diagram_question
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Automated Question Paper Generator")
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").strip().lower()
@@ -81,6 +93,16 @@ class RequestLoginOtpRequest(BaseModel):
     email: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+
+
 class GoogleAuthRequest(BaseModel):
     credential: str  # the ID token from Google's Sign-In button
 
@@ -94,6 +116,7 @@ class GenerateRequest(BaseModel):
     unit: Optional[str] = None
     language: str = "English"
     set_label: Optional[str] = None
+    question_type: str = "short_answer"  # "short_answer" | "mcq"
 
 
 class AutoGenerateRequest(BaseModel):
@@ -104,6 +127,20 @@ class AutoGenerateRequest(BaseModel):
     unit: Optional[str] = None
     language: str = "English"
     set_label: Optional[str] = None
+    question_type: str = "short_answer"  # "short_answer" | "mcq"
+
+
+class DiagramQuestionRequest(BaseModel):
+    diagram_type: str  # "graph_dfs" | "graph_bfs" | "tree_inorder" | "tree_preorder" | "tree_postorder"
+    marks: int = 10
+    num_nodes: int = 6
+    unit: Optional[str] = None
+    topic: Optional[str] = None
+
+
+class UpdateQuestionRequest(BaseModel):
+    question: Optional[str] = None
+    answer: Optional[str] = None
 
 
 class SectionInput(BaseModel):
@@ -121,6 +158,10 @@ class BuildPaperRequest(BaseModel):
     sections: List[SectionInput]
     include_answers: bool = False
     logo_filename: Optional[str] = None
+    parent_paper_id: Optional[int] = None
+    shuffle: bool = False
+    watermark_text: Optional[str] = None
+    qr_content: Optional[str] = None
 
 
 class BuildFromTemplateRequest(BaseModel):
@@ -128,11 +169,57 @@ class BuildFromTemplateRequest(BaseModel):
     template_filename: str
     sections: List[SectionInput]
     include_answers: bool = False
+    parent_paper_id: Optional[int] = None
+
+
+class BuildUniversityPaperRequest(BaseModel):
+    paper_name: str
+    university_name: str = "ABC University"
+    exam_title: str = "MID TERM EXAMINATION"
+    semester_label: str = "Odd Semester 2024-25"
+    school: str = ""
+    programme: str = ""
+    course_code: str = ""
+    course_name: str = ""
+    semester: str = ""
+    time_str: str = "1 Hr"
+    max_marks: int = 20
+    instructions: str = "All questions are compulsory."
+    sections: List[SectionInput]
+    logo_filename: Optional[str] = None
+    parent_paper_id: Optional[int] = None
+    shuffle: bool = False
+    watermark_text: Optional[str] = None
+    qr_content: Optional[str] = None
 
 
 class FeedbackRequest(BaseModel):
     category: str = "general"
     message: str
+
+
+class SaveTemplateRequest(BaseModel):
+    name: str
+    output_mode: str = "standard"  # "standard" | "university"
+    institution: Optional[str] = None
+    course: Optional[str] = None
+    duration: Optional[str] = None
+    university_name: Optional[str] = None
+    exam_title: Optional[str] = None
+    semester_label: Optional[str] = None
+    school: Optional[str] = None
+    programme: Optional[str] = None
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
+    semester: Optional[str] = None
+    time_str: Optional[str] = None
+    max_marks: Optional[int] = None
+    instructions: Optional[str] = None
+    logo_filename: Optional[str] = None
+
+
+class InviteCoTeacherRequest(BaseModel):
+    email: str
 
 
 class ShareEmailRequest(BaseModel):
@@ -174,11 +261,26 @@ def _generate_deduped(gen_fn, target_count: int, existing_texts: list, max_attem
     return collected[:target_count]
 
 
+def _question_dict(q: models.Question) -> dict:
+    return {
+        "id": q.id, "question": q.question, "answer": q.answer, "topic": q.topic,
+        "bloom_level": q.bloom_level, "marks": q.marks, "difficulty": q.difficulty,
+        "unit": q.unit, "set": q.set_label,
+        "question_type": q.question_type,
+        "options": json.loads(q.options_json) if q.options_json else None,
+        "correct_option": q.correct_option,
+        "diagram_type": q.diagram_type,
+        "diagram_data": json.loads(q.diagram_data) if q.diagram_data else None,
+    }
+
+
 def _persist_items(db: Session, items, topic: str, marks: int, difficulty: str,
-                    unit: Optional[str], owner_id: int, set_label: Optional[str] = None):
+                    unit: Optional[str], owner_id: int, set_label: Optional[str] = None,
+                    question_type: str = "short_answer"):
     saved = []
     for item in items:
-        detected_level = classify_question(item["question"])
+        is_mcq = question_type == "mcq" and "options" in item
+        detected_level = "Remember" if is_mcq else classify_question(item["question"])
         q = models.Question(
             owner_id=owner_id,
             question=item["question"],
@@ -189,15 +291,14 @@ def _persist_items(db: Session, items, topic: str, marks: int, difficulty: str,
             bloom_level=detected_level,
             unit=unit,
             set_label=set_label,
+            question_type="mcq" if is_mcq else "short_answer",
+            options_json=json.dumps(item["options"]) if is_mcq else None,
+            correct_option=item.get("correct_option") if is_mcq else None,
         )
         db.add(q)
         db.commit()
         db.refresh(q)
-        saved.append({
-            "id": q.id, "question": q.question, "answer": q.answer, "topic": q.topic,
-            "bloom_level": q.bloom_level, "marks": q.marks, "difficulty": q.difficulty,
-            "set": q.set_label,
-        })
+        saved.append(_question_dict(q))
     return saved
 
 
@@ -250,7 +351,8 @@ def root():
 
 
 @app.post("/auth/register")
-def register(req: RegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
     existing = db.query(models.User).filter(models.User.email == req.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="An account with this email already exists")
@@ -275,7 +377,8 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/verify-otp")
-def verify_otp(req: VerifyOtpRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def verify_otp(request: Request, response: Response, req: VerifyOtpRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == req.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="No account found for this email")
@@ -295,11 +398,13 @@ def verify_otp(req: VerifyOtpRequest, db: Session = Depends(get_db)):
     _sync_owner_role(db)
     db.refresh(user)
     token = auth.create_access_token(user.id, user.email)
-    return {"access_token": token, "user": _user_dict(user)}
+    auth.set_auth_cookie(response, token)
+    return {"user": _user_dict(user)}
 
 
 @app.post("/auth/resend-otp")
-def resend_otp(req: ResendOtpRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def resend_otp(request: Request, req: ResendOtpRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == req.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="No account found for this email")
@@ -316,7 +421,8 @@ def resend_otp(req: ResendOtpRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/request-login-otp")
-def request_login_otp(req: RequestLoginOtpRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def request_login_otp(request: Request, req: RequestLoginOtpRequest, db: Session = Depends(get_db)):
     """Passwordless login: send a fresh code to an EXISTING account's email,
     which they then verify at /auth/verify-otp (same endpoint used for
     registration) to get a session — no password needed at all."""
@@ -333,8 +439,50 @@ def request_login_otp(req: RequestLoginOtpRequest, db: Session = Depends(get_db)
     return {"otp_required": True, "email": user.email, "message": message}
 
 
+@app.post("/auth/forgot-password")
+@limiter.limit("5/minute")
+def forgot_password(request: Request, req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == req.email).first()
+    if not user:
+        # Don't reveal whether the email exists — same generic response either way.
+        return {"message": "If an account exists for this email, a reset code has been sent."}
+
+    otp = auth.generate_otp()
+    user.otp_code = otp
+    user.otp_expires_at = auth.otp_expiry()
+    db.commit()
+
+    _dispatch_otp(user.email, user.name, otp)
+    return {"message": "If an account exists for this email, a reset code has been sent."}
+
+
+@app.post("/auth/reset-password")
+@limiter.limit("5/minute")
+def reset_password(request: Request, response: Response, req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == req.email).first()
+    if not user or not user.otp_code or user.otp_code != req.otp:
+        raise HTTPException(status_code=400, detail="Incorrect or expired code")
+    if user.otp_expires_at and user.otp_expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Code expired — request a new one")
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    user.password = auth.hash_password(req.new_password)
+    user.otp_code = None
+    user.otp_expires_at = None
+    user.is_verified = True
+    db.commit()
+
+    _sync_owner_role(db)
+    db.refresh(user)
+    token = auth.create_access_token(user.id, user.email)
+    auth.set_auth_cookie(response, token)
+    return {"user": _user_dict(user)}
+
+
 @app.post("/auth/login")
-def login(req: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, response: Response, req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == req.email).first()
     if not user or not auth.verify_password(req.password, user.password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
@@ -350,7 +498,8 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     _sync_owner_role(db)
     db.refresh(user)
     token = auth.create_access_token(user.id, user.email)
-    return {"access_token": token, "user": _user_dict(user)}
+    auth.set_auth_cookie(response, token)
+    return {"user": _user_dict(user)}
 
 
 @app.get("/auth/me")
@@ -360,8 +509,15 @@ def get_me(current_user: models.User = Depends(auth.get_current_user), db: Sessi
     return _user_dict(current_user)
 
 
+@app.post("/auth/logout")
+def logout(response: Response):
+    auth.clear_auth_cookie(response)
+    return {"message": "Logged out"}
+
+
 @app.post("/auth/google")
-def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def google_auth(request: Request, response: Response, req: GoogleAuthRequest, db: Session = Depends(get_db)):
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Google sign-in isn't configured on this server yet")
 
@@ -369,7 +525,8 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
         idinfo = google_id_token.verify_oauth2_token(
             req.credential, google_requests.Request(), GOOGLE_CLIENT_ID
         )
-    except ValueError:
+    except ValueError as e:
+        print(f"[google_auth] Token verification failed: {e}")
         raise HTTPException(status_code=401, detail="Invalid Google credential")
 
     email = idinfo.get("email")
@@ -408,7 +565,8 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
     _sync_owner_role(db)
     db.refresh(user)
     token = auth.create_access_token(user.id, user.email)
-    return {"access_token": token, "user": _user_dict(user)}
+    auth.set_auth_cookie(response, token)
+    return {"user": _user_dict(user)}
 
 
 @app.post("/profile/avatar")
@@ -501,27 +659,32 @@ async def upload_template(file: UploadFile = File(...),
 
 # ---------- Generation routes ----------
 @app.post("/generate")
-def generate(req: GenerateRequest, db: Session = Depends(get_db),
+@limiter.limit("15/minute")
+def generate(request: Request, req: GenerateRequest, db: Session = Depends(get_db),
              current_user: models.User = Depends(auth.get_current_user)):
     existing = [q.question for q in db.query(models.Question).filter(
         models.Question.topic == req.topic, models.Question.owner_id == current_user.id).all()]
 
-    collected = _generate_deduped(
-        gen_fn=lambda count: generate_questions(
+    if req.question_type == "mcq":
+        gen_fn = lambda count: generate_mcq_questions(
+            topic=req.topic, difficulty=req.difficulty, count=count, language=req.language,
+        )
+    else:
+        gen_fn = lambda count: generate_questions(
             topic=req.topic, bloom_level=req.bloom_level, marks=req.marks,
             difficulty=req.difficulty, count=count, language=req.language,
-        ),
-        target_count=req.count,
-        existing_texts=existing,
-    )
+        )
+
+    collected = _generate_deduped(gen_fn=gen_fn, target_count=req.count, existing_texts=existing)
     saved = _persist_items(db, collected, req.topic, req.marks, req.difficulty,
-                            req.unit, current_user.id, req.set_label)
+                            req.unit, current_user.id, req.set_label, req.question_type)
     return {"requested_level": req.bloom_level, "requested_count": req.count,
             "actual_count": len(saved), "questions": saved}
 
 
 @app.post("/generate/auto")
-def generate_auto(req: AutoGenerateRequest, db: Session = Depends(get_db),
+@limiter.limit("5/minute")
+def generate_auto(request: Request, req: AutoGenerateRequest, db: Session = Depends(get_db),
                    current_user: models.User = Depends(auth.get_current_user)):
     """Bulk-generate questions across MANY topics in one click, with retry-to-target
     per topic so the actual yield matches what was requested."""
@@ -562,11 +725,55 @@ def generate_auto(req: AutoGenerateRequest, db: Session = Depends(get_db),
     }
 
 
+@app.post("/generate/diagram")
+@limiter.limit("15/minute")
+def generate_diagram_question(request: Request, req: DiagramQuestionRequest, db: Session = Depends(get_db),
+                               current_user: models.User = Depends(auth.get_current_user)):
+    """Graph/tree traversal questions — the diagram AND the answer are both
+    generated by real algorithms (not the AI), so the answer is guaranteed
+    correct rather than an LLM's best guess at a graph traversal."""
+    valid_types = ("graph_dfs", "graph_bfs", "tree_inorder", "tree_preorder", "tree_postorder")
+    if req.diagram_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"diagram_type must be one of {valid_types}")
+
+    question_text, answer_text, diagram_data = build_diagram_question(
+        req.diagram_type, num_nodes=max(4, min(req.num_nodes, 8))
+    )
+    bloom_level = "Apply" if "graph" in req.diagram_type else "Understand"
+
+    q = models.Question(
+        owner_id=current_user.id,
+        question=question_text,
+        answer=answer_text,
+        topic=req.topic or "Data Structures",
+        marks=req.marks,
+        difficulty="Medium",
+        bloom_level=bloom_level,
+        unit=req.unit,
+        question_type="short_answer",
+        diagram_type=req.diagram_type,
+        diagram_data=json.dumps(diagram_data),
+    )
+    db.add(q)
+    db.commit()
+    db.refresh(q)
+    return {"questions": [_question_dict(q)]}
+
+
 @app.get("/questions")
 def list_questions(topic: Optional[str] = None, bloom_level: Optional[str] = None,
-                    search: Optional[str] = None, db: Session = Depends(get_db),
+                    search: Optional[str] = None, owner_id: Optional[int] = None,
+                    db: Session = Depends(get_db),
                     current_user: models.User = Depends(auth.get_current_user)):
-    query = db.query(models.Question).filter(models.Question.owner_id == current_user.id)
+    effective_owner_id = current_user.id
+    if owner_id and owner_id != current_user.id:
+        has_access = db.query(models.SharedAccess).filter(
+            models.SharedAccess.owner_id == owner_id,
+            models.SharedAccess.shared_with_email == current_user.email.lower()).first()
+        if not has_access:
+            raise HTTPException(status_code=403, detail="No access to this teacher's question bank")
+        effective_owner_id = owner_id
+    query = db.query(models.Question).filter(models.Question.owner_id == effective_owner_id)
     if topic:
         query = query.filter(models.Question.topic == topic)
     if bloom_level:
@@ -574,12 +781,104 @@ def list_questions(topic: Optional[str] = None, bloom_level: Optional[str] = Non
     if search:
         query = query.filter(models.Question.question.ilike(f"%{search}%"))
     results = query.order_by(models.Question.created_at.desc()).all()
-    return [
-        {"id": q.id, "question": q.question, "answer": q.answer, "topic": q.topic,
-         "marks": q.marks, "difficulty": q.difficulty, "bloom_level": q.bloom_level,
-         "unit": q.unit, "set": q.set_label, "created_at": q.created_at}
-        for q in results
-    ]
+    return [dict(_question_dict(q), created_at=q.created_at) for q in results]
+
+
+@app.patch("/questions/{question_id}")
+def update_question(question_id: int, req: UpdateQuestionRequest, db: Session = Depends(get_db),
+                     current_user: models.User = Depends(auth.get_current_user)):
+    """Lets a teacher correct the AI's question wording or model answer
+    before it goes into a real paper — review/edit, not just accept-as-is."""
+    q = db.query(models.Question).filter(
+        models.Question.id == question_id, models.Question.owner_id == current_user.id
+    ).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    if req.question is not None and req.question.strip():
+        q.question = req.question.strip()
+    if req.answer is not None:
+        q.answer = req.answer.strip()
+
+    db.commit()
+    db.refresh(q)
+    return _question_dict(q)
+
+
+
+def _next_paper_version(db: Session, parent_paper_id: Optional[int]) -> int:
+    if not parent_paper_id:
+        return 1
+    parent = db.query(models.Paper).filter(models.Paper.id == parent_paper_id).first()
+    return (parent.version + 1) if parent else 1
+
+
+def _maybe_shuffle(sections_payload: list, shuffle: bool) -> list:
+    if shuffle:
+        for s in sections_payload:
+            random.shuffle(s["questions"])
+    return sections_payload
+
+
+def _maybe_make_qr(qr_content: Optional[str], paper_id_hint) -> Optional[str]:
+    if not qr_content:
+        return None
+    from services.pdf_export import make_qr_image
+    path = os.path.join(GENERATED_DIR, f"qr_{paper_id_hint}.png")
+    return make_qr_image(qr_content, path)
+
+
+# ---------- Co-teacher sharing ----------
+@app.post("/share/invite")
+def invite_co_teacher(req: InviteCoTeacherRequest, db: Session = Depends(get_db),
+                       current_user: models.User = Depends(auth.get_current_user)):
+    email = req.email.strip().lower()
+    if email == current_user.email.lower():
+        raise HTTPException(status_code=400, detail="Can't share with yourself")
+    existing = db.query(models.SharedAccess).filter(
+        models.SharedAccess.owner_id == current_user.id,
+        models.SharedAccess.shared_with_email == email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Already shared with this email")
+    share = models.SharedAccess(owner_id=current_user.id, shared_with_email=email)
+    db.add(share)
+    db.commit()
+    db.refresh(share)
+    return {"id": share.id, "shared_with_email": share.shared_with_email}
+
+
+@app.get("/share/my-shares")
+def list_my_shares(db: Session = Depends(get_db),
+                    current_user: models.User = Depends(auth.get_current_user)):
+    """Who I've given access to my question bank."""
+    shares = db.query(models.SharedAccess).filter(models.SharedAccess.owner_id == current_user.id).all()
+    return [{"id": s.id, "shared_with_email": s.shared_with_email, "created_at": s.created_at} for s in shares]
+
+
+@app.delete("/share/{share_id}")
+def revoke_share(share_id: int, db: Session = Depends(get_db),
+                  current_user: models.User = Depends(auth.get_current_user)):
+    share = db.query(models.SharedAccess).filter(
+        models.SharedAccess.id == share_id, models.SharedAccess.owner_id == current_user.id).first()
+    if not share:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(share)
+    db.commit()
+    return {"message": "Revoked"}
+
+
+@app.get("/share/shared-with-me")
+def list_shared_with_me(db: Session = Depends(get_db),
+                         current_user: models.User = Depends(auth.get_current_user)):
+    """Teachers whose question banks I can view."""
+    shares = db.query(models.SharedAccess).filter(
+        models.SharedAccess.shared_with_email == current_user.email.lower()).all()
+    result = []
+    for s in shares:
+        owner = db.query(models.User).filter(models.User.id == s.owner_id).first()
+        if owner:
+            result.append({"owner_id": owner.id, "owner_name": owner.name, "owner_email": owner.email})
+    return result
 
 
 # ---------- Paper build routes ----------
@@ -594,10 +893,7 @@ def build_paper(req: BuildPaperRequest, db: Session = Depends(get_db),
             models.Question.id.in_(section.question_ids),
             models.Question.owner_id == current_user.id).all()
         id_to_q = {q.id: q for q in questions}
-        ordered = [
-            {"question": id_to_q[i].question, "answer": id_to_q[i].answer}
-            for i in section.question_ids if i in id_to_q
-        ]
+        ordered = [_question_dict(id_to_q[i]) for i in section.question_ids if i in id_to_q]
         sections_payload.append({"name": section.name, "questions": ordered})
         all_ids.extend(section.question_ids)
 
@@ -606,18 +902,80 @@ def build_paper(req: BuildPaperRequest, db: Session = Depends(get_db),
         paper_name=req.paper_name,
         question_ids=",".join(str(i) for i in all_ids),
         file_type="pdf",
+        parent_paper_id=req.parent_paper_id,
+        version=_next_paper_version(db, req.parent_paper_id),
     )
     db.add(paper)
     db.commit()
     db.refresh(paper)
 
     logo_path = os.path.join(LOGO_DIR, req.logo_filename) if req.logo_filename else None
+    sections_payload = _maybe_shuffle(sections_payload, req.shuffle)
+    qr_path = _maybe_make_qr(req.qr_content, paper.id)
 
     output_path = os.path.join(GENERATED_DIR, f"paper_{paper.id}.pdf")
     build_pdf(
         output_path=output_path, institution=req.institution, course=req.course,
         duration=req.duration, max_marks=req.max_marks, instructions=req.instructions,
         sections=sections_payload, include_answers=req.include_answers, logo_path=logo_path,
+        watermark_text=req.watermark_text, qr_image_path=qr_path,
+    )
+
+    return {"paper_id": paper.id, "download_url": f"/paper/{paper.id}/download"}
+
+
+@app.post("/paper/build-university")
+def build_university_paper(req: BuildUniversityPaperRequest, db: Session = Depends(get_db),
+                            current_user: models.User = Depends(auth.get_current_user)):
+    """University-format paper — Roll No line, School/Programme/Course metadata
+    block, and Q.No/Question/Marks/CO-L tables matching the common Indian
+    university mid-term/end-semester layout."""
+    all_ids = []
+    sections_payload = []
+
+    for section in req.sections:
+        questions = db.query(models.Question).filter(
+            models.Question.id.in_(section.question_ids),
+            models.Question.owner_id == current_user.id).all()
+        id_to_q = {q.id: q for q in questions}
+        ordered = [_question_dict(id_to_q[i]) for i in section.question_ids if i in id_to_q]
+        sections_payload.append({"name": section.name, "questions": ordered})
+        all_ids.extend(section.question_ids)
+
+    paper = models.Paper(
+        owner_id=current_user.id,
+        paper_name=req.paper_name,
+        question_ids=",".join(str(i) for i in all_ids),
+        file_type="pdf",
+        parent_paper_id=req.parent_paper_id,
+        version=_next_paper_version(db, req.parent_paper_id),
+    )
+    db.add(paper)
+    db.commit()
+    db.refresh(paper)
+
+    logo_path = os.path.join(LOGO_DIR, req.logo_filename) if req.logo_filename else None
+    sections_payload = _maybe_shuffle(sections_payload, req.shuffle)
+    qr_path = _maybe_make_qr(req.qr_content, paper.id)
+
+    output_path = os.path.join(GENERATED_DIR, f"paper_{paper.id}.pdf")
+    build_university_pdf(
+        output_path=output_path,
+        university_name=req.university_name,
+        exam_title=req.exam_title,
+        semester_label=req.semester_label,
+        school=req.school,
+        programme=req.programme,
+        course_code=req.course_code,
+        course_name=req.course_name,
+        semester=req.semester,
+        time_str=req.time_str,
+        max_marks=req.max_marks,
+        instructions=req.instructions,
+        sections=sections_payload,
+        logo_path=logo_path,
+        watermark_text=req.watermark_text,
+        qr_image_path=qr_path,
     )
 
     return {"paper_id": paper.id, "download_url": f"/paper/{paper.id}/download"}
@@ -649,6 +1007,8 @@ def build_paper_from_template(req: BuildFromTemplateRequest, db: Session = Depen
         paper_name=req.paper_name,
         question_ids=",".join(str(i) for i in all_ids),
         file_type="docx",
+        parent_paper_id=req.parent_paper_id,
+        version=_next_paper_version(db, req.parent_paper_id),
     )
     db.add(paper)
     db.commit()
@@ -681,8 +1041,32 @@ def download_paper(paper_id: int, db: Session = Depends(get_db)):
     return FileResponse(file_path, media_type=media_type, filename=f"{paper.paper_name}.{ext}")
 
 
+@app.get("/paper/{paper_id}/preview")
+def preview_paper(paper_id: int, db: Session = Depends(get_db)):
+    """Same file as /download, but with Content-Disposition: inline so the
+    browser renders it directly (in an <iframe>, typically) instead of
+    triggering a download prompt."""
+    paper = db.query(models.Paper).filter(models.Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    ext = "docx" if paper.file_type == "docx" else "pdf"
+    if ext != "pdf":
+        raise HTTPException(status_code=400, detail="Only PDF papers can be previewed in-browser — DOCX will download instead")
+
+    file_path = os.path.join(GENERATED_DIR, f"paper_{paper.id}.{ext}")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not generated yet")
+
+    return FileResponse(
+        file_path, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{paper.paper_name}.pdf"'},
+    )
+
+
 @app.post("/paper/{paper_id}/share-email")
-def share_paper_email(paper_id: int, req: ShareEmailRequest, db: Session = Depends(get_db),
+@limiter.limit("10/minute")
+def share_paper_email(request: Request, paper_id: int, req: ShareEmailRequest, db: Session = Depends(get_db),
                        current_user: models.User = Depends(auth.get_current_user)):
     if not email_configured():
         raise HTTPException(
@@ -723,7 +1107,148 @@ def list_papers(db: Session = Depends(get_db),
         models.Paper.owner_id == current_user.id
     ).order_by(models.Paper.created_at.desc()).all()
     return [{"id": p.id, "paper_name": p.paper_name, "file_type": p.file_type,
-             "created_at": p.created_at} for p in papers]
+             "parent_paper_id": p.parent_paper_id, "version": p.version, "created_at": p.created_at} for p in papers]
+
+
+@app.get("/papers/{paper_id}")
+def get_paper_detail(paper_id: int, db: Session = Depends(get_db),
+                      current_user: models.User = Depends(auth.get_current_user)):
+    """Returns a paper's full question list — used by the 'rebuild this paper'
+    flow, which loads these questions back into the Generate Paper workspace
+    so the teacher can tweak/add/remove before building a new version."""
+    paper = db.query(models.Paper).filter(
+        models.Paper.id == paper_id, models.Paper.owner_id == current_user.id
+    ).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    ids = [int(i) for i in paper.question_ids.split(",") if i]
+    questions = db.query(models.Question).filter(
+        models.Question.id.in_(ids), models.Question.owner_id == current_user.id
+    ).all()
+    id_to_q = {q.id: q for q in questions}
+    ordered = [_question_dict(id_to_q[i]) for i in ids if i in id_to_q]
+
+    return {
+        "id": paper.id, "paper_name": paper.paper_name, "file_type": paper.file_type,
+        "parent_paper_id": paper.parent_paper_id, "version": paper.version, "created_at": paper.created_at,
+        "questions": ordered,
+    }
+
+
+# ---------- Paper templates (save institution/course details for reuse) ----------
+def _template_dict(t: models.PaperTemplate) -> dict:
+    return {
+        "id": t.id, "name": t.name, "output_mode": t.output_mode,
+        "institution": t.institution, "course": t.course, "duration": t.duration,
+        "university_name": t.university_name, "exam_title": t.exam_title,
+        "semester_label": t.semester_label, "school": t.school, "programme": t.programme,
+        "course_code": t.course_code, "course_name": t.course_name, "semester": t.semester,
+        "time_str": t.time_str, "max_marks": t.max_marks, "instructions": t.instructions,
+        "logo_filename": t.logo_filename, "created_at": t.created_at,
+    }
+
+
+@app.post("/paper-templates")
+def save_paper_template(req: SaveTemplateRequest, db: Session = Depends(get_db),
+                         current_user: models.User = Depends(auth.get_current_user)):
+    t = models.PaperTemplate(owner_id=current_user.id, **req.dict())
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    return _template_dict(t)
+
+
+@app.get("/paper-templates")
+def list_paper_templates(db: Session = Depends(get_db),
+                          current_user: models.User = Depends(auth.get_current_user)):
+    templates = db.query(models.PaperTemplate).filter(
+        models.PaperTemplate.owner_id == current_user.id
+    ).order_by(models.PaperTemplate.created_at.desc()).all()
+    return [_template_dict(t) for t in templates]
+
+
+@app.delete("/paper-templates/{template_id}")
+def delete_paper_template(template_id: int, db: Session = Depends(get_db),
+                           current_user: models.User = Depends(auth.get_current_user)):
+    t = db.query(models.PaperTemplate).filter(
+        models.PaperTemplate.id == template_id, models.PaperTemplate.owner_id == current_user.id
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+    db.delete(t)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ---------- Similarity check (near-duplicate questions in your bank) ----------
+@app.get("/questions/similarity")
+def check_similarity(threshold: float = 0.75, db: Session = Depends(get_db),
+                      current_user: models.User = Depends(auth.get_current_user)):
+    """Flags near-duplicate questions within the same topic — genuinely
+    different wording of the same question, which exact-match dedup during
+    generation wouldn't catch. Capped comparisons (same-topic only) so this
+    stays fast even with a few hundred questions."""
+    questions = db.query(models.Question).filter(
+        models.Question.owner_id == current_user.id
+    ).order_by(models.Question.topic).all()
+
+    by_topic = {}
+    for q in questions:
+        by_topic.setdefault(q.topic or "Untitled", []).append(q)
+
+    pairs = []
+    MAX_PER_TOPIC = 150  # avoid O(n^2) blowup on a huge single-topic bank
+    for topic, qs in by_topic.items():
+        qs = qs[:MAX_PER_TOPIC]
+        for i in range(len(qs)):
+            for j in range(i + 1, len(qs)):
+                ratio = SequenceMatcher(None, qs[i].question.lower(), qs[j].question.lower()).ratio()
+                if ratio >= threshold:
+                    pairs.append({
+                        "topic": topic, "similarity": round(ratio, 3),
+                        "question_a": {"id": qs[i].id, "text": qs[i].question},
+                        "question_b": {"id": qs[j].id, "text": qs[j].question},
+                    })
+
+    pairs.sort(key=lambda p: p["similarity"], reverse=True)
+    return {"total_questions": len(questions), "similar_pairs": pairs}
+
+
+# ---------- Export MCQs for Google Forms-style bulk importers ----------
+@app.get("/questions/export-mcq-csv")
+def export_mcq_csv(ids: Optional[str] = None, db: Session = Depends(get_db),
+                    current_user: models.User = Depends(auth.get_current_user)):
+    """CSV with one row per MCQ: Question, Option A-D, Answer. Google Forms
+    itself has no native bulk-import feature (confirmed — there isn't a
+    'direct' path), but this column layout matches what popular import
+    add-ons (Form Builder, Formswrite, etc.) expect, so you can drop this
+    straight into one of those instead of retyping every question by hand."""
+    query = db.query(models.Question).filter(
+        models.Question.owner_id == current_user.id, models.Question.question_type == "mcq"
+    )
+    if ids:
+        id_list = [int(i) for i in ids.split(",") if i.strip().isdigit()]
+        query = query.filter(models.Question.id.in_(id_list))
+    questions = query.order_by(models.Question.created_at.desc()).all()
+
+    if not questions:
+        raise HTTPException(status_code=404, detail="No MCQ questions found to export")
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Question", "Option A", "Option B", "Option C", "Option D", "Answer"])
+    for q in questions:
+        options = json.loads(q.options_json) if q.options_json else ["", "", "", ""]
+        while len(options) < 4:
+            options.append("")
+        writer.writerow([q.question, *options[:4], q.correct_option or ""])
+
+    csv_path = os.path.join(GENERATED_DIR, f"mcq_export_{current_user.id}_{int(datetime.utcnow().timestamp())}.csv")
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        f.write(output.getvalue())
+
+    return FileResponse(csv_path, media_type="text/csv", filename="mcq_questions.csv")
 
 
 # ---------- Stats & activity ----------
@@ -766,7 +1291,7 @@ def get_activity(db: Session = Depends(get_db),
         models.Paper.owner_id == current_user.id
     ).order_by(models.Paper.created_at.desc()).limit(5).all()
     recent_questions = db.query(
-        models.Question.topic, models.Question.bloom_level, models.Question.created_at
+        models.Question.id, models.Question.topic, models.Question.bloom_level, models.Question.created_at
     ).filter(models.Question.owner_id == current_user.id
              ).order_by(models.Question.created_at.desc()).limit(5).all()
     recent_replies = db.query(models.Feedback).filter(
@@ -776,13 +1301,16 @@ def get_activity(db: Session = Depends(get_db),
 
     items = []
     for p in recent_papers:
-        items.append({"type": "paper", "text": f'Built paper "{p.paper_name}"', "timestamp": p.created_at})
+        items.append({"id": f"paper-{p.id}", "type": "paper",
+                       "text": f'Built paper "{p.paper_name}"', "timestamp": p.created_at})
     for q in recent_questions:
-        items.append({"type": "question", "text": f'Generated a {q.bloom_level} question on "{q.topic}"',
+        items.append({"id": f"question-{q.id}", "type": "question",
+                       "text": f'Generated a {q.bloom_level} question on "{q.topic}"',
                        "timestamp": q.created_at})
     for f in recent_replies:
         preview = f.reply if len(f.reply) <= 80 else f.reply[:77] + "..."
-        items.append({"type": "reply", "text": f'Owner replied: "{preview}"', "timestamp": f.reply_at,
+        items.append({"id": f"reply-{f.id}", "type": "reply",
+                       "text": f'Owner replied: "{preview}"', "timestamp": f.reply_at,
                        "feedback_id": f.id})
 
     items.sort(key=lambda x: x["timestamp"], reverse=True)
@@ -791,7 +1319,8 @@ def get_activity(db: Session = Depends(get_db),
 
 # ---------- Feedback ----------
 @app.post("/feedback")
-def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db),
+@limiter.limit("10/minute")
+def submit_feedback(request: Request, req: FeedbackRequest, db: Session = Depends(get_db),
                      current_user: models.User = Depends(auth.get_current_user)):
     fb = models.Feedback(owner_id=current_user.id, category=req.category, message=req.message)
     db.add(fb)

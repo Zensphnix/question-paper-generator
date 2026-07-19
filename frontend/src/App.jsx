@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import Sidebar from "./components/Sidebar.jsx";
 import Topbar from "./components/Topbar.jsx";
+import Footer from "./components/Footer.jsx";
 import Login from "./pages/Login.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import UploadNotes from "./pages/UploadNotes.jsx";
@@ -12,27 +13,26 @@ import QuestionBank from "./pages/QuestionBank.jsx";
 import Support from "./pages/Support.jsx";
 import Admin from "./pages/Admin.jsx";
 import Settings from "./pages/Settings.jsx";
-import { getMe } from "./services/api.js";
-import { useLanguage } from "./context/LanguageContext.jsx";
+import Terms from "./pages/Terms.jsx";
+import Privacy from "./pages/Privacy.jsx";
+import { getMe, logout } from "./services/api.js";
+import { useLanguage } from "./context/useLanguage.js";
 
 function Page({ children }) {
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.18, ease: "easeInOut" }}
     >
       {children}
-    </motion.div>
+    </m.div>
   );
 }
 
-export default function App() {
-  const [darkMode, setDarkMode] = useState(false);
+function AuthenticatedApp({ user, darkMode, setDarkMode, handleLogout, handleUserUpdate }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [user, setUser] = useState(null);
-  const [checkingSession, setCheckingSession] = useState(true);
   const location = useLocation();
   const { t } = useLanguage();
 
@@ -48,55 +48,13 @@ export default function App() {
   };
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", darkMode);
-  }, [darkMode]);
-
-  useEffect(() => {
     setSidebarOpen(false); // close mobile drawer on every navigation
   }, [location.pathname]);
-
-  useEffect(() => {
-    const token = localStorage.getItem("authToken");
-    if (!token) {
-      setCheckingSession(false);
-      return;
-    }
-    getMe()
-      .then(setUser)
-      .catch(() => {
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("authUser");
-      })
-      .finally(() => setCheckingSession(false));
-  }, []);
-
-  function handleLogout() {
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("authUser");
-    setUser(null);
-  }
-
-  function handleUserUpdate(updatedUser) {
-    localStorage.setItem("authUser", JSON.stringify(updatedUser));
-    setUser(updatedUser);
-  }
-
-  if (checkingSession) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <p className="text-sm text-slate-400">Loading...</p>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Login onAuth={setUser} />;
-  }
 
   const meta = pageMeta[location.pathname] || pageMeta["/"];
 
   return (
-    <div className="flex bg-slate-50 dark:bg-slate-950 min-h-screen">
+    <div className="flex bg-cream-soft dark:bg-inkscale-900 min-h-screen">
       <Sidebar
         darkMode={darkMode}
         onToggleDark={() => setDarkMode((d) => !d)}
@@ -104,7 +62,7 @@ export default function App() {
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex flex-col">
         <Topbar
           title={meta.title}
           subtitle={location.pathname === "/" ? `${t("welcomeBack")}, ${user.name.split(" ")[0]}` : undefined}
@@ -112,7 +70,7 @@ export default function App() {
           onLogout={handleLogout}
           onMenuClick={() => setSidebarOpen(true)}
         />
-        <main className="p-4 sm:p-8">
+        <main className="p-4 sm:p-8 flex-1">
           <AnimatePresence mode="wait">
             <Routes location={location} key={location.pathname}>
               <Route path="/" element={<Page><Dashboard /></Page>} />
@@ -126,7 +84,75 @@ export default function App() {
             </Routes>
           </AnimatePresence>
         </main>
+        <Footer />
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  const [darkMode, setDarkMode] = useState(false);
+  const [user, setUser] = useState(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", darkMode);
+  }, [darkMode]);
+
+  useEffect(() => {
+    // No token to check in localStorage anymore — the HttpOnly cookie (if any)
+    // is sent automatically by the browser, so we just try getMe() and let a
+    // 401 mean "not logged in" rather than pre-checking a token ourselves.
+    getMe()
+      .then(setUser)
+      .catch(() => {
+        localStorage.removeItem("authUser:v1");
+      })
+      .finally(() => setCheckingSession(false));
+  }, []);
+
+  async function handleLogout() {
+    try {
+      await logout();
+    } catch {
+      // even if the network call fails, clear local UI state so the user
+      // isn't stuck looking logged-in
+    }
+    setUser(null);
+  }
+
+  function handleUserUpdate(updatedUser) {
+    localStorage.setItem("authUser:v1", JSON.stringify(updatedUser));
+    setUser(updatedUser);
+  }
+
+  return (
+    <Routes>
+      {/* Public, always accessible regardless of login state */}
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/privacy" element={<Privacy />} />
+
+      {/* Everything else requires auth */}
+      <Route
+        path="/*"
+        element={
+          checkingSession ? (
+            <div className="min-h-screen flex items-center justify-center bg-inkscale-50 dark:bg-inkscale-900">
+              <p className="text-sm text-inkscale-300">Loading...</p>
+            </div>
+          ) : !user ? (
+            <Login onAuth={setUser} />
+          ) : (
+            <AuthenticatedApp
+              user={user}
+              darkMode={darkMode}
+              setDarkMode={setDarkMode}
+              handleLogout={handleLogout}
+              handleUserUpdate={handleUserUpdate}
+            />
+          )
+        }
+      />
+    </Routes>
   );
 }

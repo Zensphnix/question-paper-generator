@@ -166,6 +166,28 @@ export const translations = {
     paperCompletion: "Paper Completion",
     weeklyAnalytics: "Weekly Analytics",
     questionsThisWeek: "Questions generated this week",
+
+    // Footer
+    helpCenter: "Help Center",
+    reportABug: "Report a Bug",
+    terms: "Terms",
+    privacyPolicy: "Privacy Policy",
+
+    // Login page
+    logIn: "Log in",
+    register: "Register",
+    nameLabel: "Name",
+    createAccount: "Create account",
+    pleaseWait: "Please wait...",
+    forgotPassword: "Forgot password?",
+    continueWithGoogle: "Continue with Google",
+    or: "or",
+    resetYourPassword: "Reset your password",
+    backToLogin: "Back to login",
+    sendResetCode: "Send reset code",
+    resetPasswordAndLogin: "Reset password & log in",
+    agreeToTerms: "By continuing, you agree to the",
+    and: "and",
   },
   hi: {
     // Nav
@@ -332,5 +354,27 @@ export const translations = {
     paperCompletion: "पत्र पूर्णता",
     weeklyAnalytics: "साप्ताहिक विश्लेषण",
     questionsThisWeek: "इस सप्ताह बनाए गए प्रश्न",
+
+    // Footer
+    helpCenter: "सहायता केंद्र",
+    reportABug: "बग की रिपोर्ट करें",
+    terms: "नियम",
+    privacyPolicy: "गोपनीयता नीति",
+
+    // Login page
+    logIn: "लॉग इन",
+    register: "रजिस्टर करें",
+    nameLabel: "नाम",
+    createAccount: "खाता बनाएं",
+    pleaseWait: "कृपया प्रतीक्षा करें...",
+    forgotPassword: "पासवर्ड भूल गए?",
+    continueWithGoogle: "Google से जारी रखें",
+    or: "या",
+    resetYourPassword: "अपना पासवर्ड रीसेट करें",
+    backToLogin: "लॉगिन पर वापस जाएं",
+    sendResetCode: "रीसेट कोड भेजें",
+    resetPasswordAndLogin: "पासवर्ड रीसेट करें और लॉग इन करें",
+    agreeToTerms: "जारी रखकर, आप सहमत होते हैं",
+    and: "और",
   },
 };

@@ -1,42 +1,35 @@
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { useLanguage } from "../context/LanguageContext.jsx";
+import { lazy, Suspense } from "react";
+import { useLanguage } from "../context/useLanguage.js";
+
+// recharts is a genuinely heavy library, and this chart is below-the-fold
+// content on the Dashboard — lazy-loading it means people don't pay for it
+// in their initial page load, only once this card actually renders.
+const AnalyticsChartInner = lazy(() => import("./AnalyticsChartInner.jsx"));
+
+function ChartSkeleton() {
+  return (
+    <div className="h-[220px] flex items-center justify-center text-sm text-inkscale-200 dark:text-inkscale-500">
+      Loading chart...
+    </div>
+  );
+}
 
 export default function AnalyticsChart({ data }) {
   const { t } = useLanguage();
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-6">
+    <div className="bg-white dark:bg-inkscale-800 border border-inkscale-100/70 dark:border-white/10 rounded-2xl shadow-paper p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="font-semibold text-slate-900 dark:text-white">{t("weeklyAnalytics")}</h3>
-          <p className="text-xs text-slate-400 dark:text-slate-500">
+          <h3 className="font-semibold text-inkscale-800 dark:text-white">{t("weeklyAnalytics")}</h3>
+          <p className="text-xs text-inkscale-300 dark:text-inkscale-400">
             {t("questionsThisWeek")}
           </p>
         </div>
       </div>
 
-      <ResponsiveContainer width="100%" height={220}>
-        <AreaChart data={data}>
-          <defs>
-            <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
-              <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-          <XAxis dataKey="date" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
-          <Tooltip
-            contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }}
-          />
-          <Area
-            type="monotone"
-            dataKey="count"
-            stroke="#8b5cf6"
-            strokeWidth={2}
-            fill="url(#colorCount)"
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+      <Suspense fallback={<ChartSkeleton />}>
+        <AnalyticsChartInner data={data} />
+      </Suspense>
     </div>
   );
 }

@@ -47,6 +47,16 @@ CREATE TABLE IF NOT EXISTS feedback (
 conn.commit()
 print("  done")
 
+cur.execute("""
+CREATE TABLE IF NOT EXISTS shared_access (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id INTEGER NOT NULL,
+    shared_with_email TEXT NOT NULL,
+    created_at DATETIME
+)
+""")
+conn.commit()
+
 print("\nAdding new columns...")
 add_column("users", "is_verified", "BOOLEAN DEFAULT 1")   # existing users grandfathered in, no OTP needed
 add_column("users", "otp_code", "TEXT")
@@ -55,9 +65,44 @@ add_column("users", "auth_provider", "TEXT DEFAULT 'password'")
 add_column("users", "avatar_url", "TEXT")
 add_column("questions", "owner_id", "INTEGER")
 add_column("questions", "set_label", "TEXT")
+add_column("questions", "question_type", "TEXT DEFAULT 'short_answer'")
+add_column("questions", "options_json", "TEXT")
+add_column("questions", "correct_option", "TEXT")
+add_column("questions", "diagram_type", "TEXT")
+add_column("questions", "diagram_data", "TEXT")
 add_column("papers", "owner_id", "INTEGER")
+add_column("papers", "parent_paper_id", "INTEGER")
+add_column("papers", "version", "INTEGER DEFAULT 1")
 add_column("feedback", "reply", "TEXT")
 add_column("feedback", "reply_at", "DATETIME")
+
+print("\nCreating paper_templates table if missing...")
+cur.execute("""
+CREATE TABLE IF NOT EXISTS paper_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id INTEGER,
+    name TEXT NOT NULL,
+    output_mode TEXT DEFAULT 'standard',
+    institution TEXT,
+    course TEXT,
+    duration TEXT,
+    university_name TEXT,
+    exam_title TEXT,
+    semester_label TEXT,
+    school TEXT,
+    programme TEXT,
+    course_code TEXT,
+    course_name TEXT,
+    semester TEXT,
+    time_str TEXT,
+    max_marks INTEGER,
+    instructions TEXT,
+    logo_filename TEXT,
+    created_at DATETIME
+)
+""")
+conn.commit()
+print("  done")
 
 print("\nAssigning existing (ownerless) questions/papers to your first account...")
 cur.execute("SELECT id FROM users ORDER BY id LIMIT 1")

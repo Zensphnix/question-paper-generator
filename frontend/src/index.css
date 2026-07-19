@@ -7,5 +7,64 @@ html {
 }
 
 body {
-  @apply bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200;
+  @apply bg-paper dark:bg-inkscale-900 text-inkscale-800 dark:text-inkscale-100 font-sans;
+  background-image: radial-gradient(circle at 1px 1px, rgba(28,43,69,0.05) 1px, transparent 0);
+  background-size: 22px 22px;
+  letter-spacing: -0.01em;
+}
+.dark body {
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
+}
+
+/* Subtle paper grain — applied as an overlay, not a background swap, so it
+   layers over any surface (cards, panels) without fighting their own color. */
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+/* Layered elevation — softer, warmer, more directional than a flat Tailwind
+   shadow, so cards read as sitting slightly above the paper rather than
+   just having a border. */
+.shadow-paper {
+  box-shadow: 0 1px 2px rgba(28,43,69,0.04), 0 8px 24px -12px rgba(28,43,69,0.14);
+}
+.shadow-paper-lg {
+  box-shadow: 0 2px 4px rgba(28,43,69,0.06), 0 16px 40px -14px rgba(28,43,69,0.22);
+}
+
+/* Brand-colored focus ring instead of the browser default blue. */
+:focus-visible {
+  outline: 2px solid #D2AC55;
+  outline-offset: 2px;
+}
+
+/* Design-system tokens that flip with the .dark class — used by the
+   Login/Dashboard/Sidebar redesign, which relies on inline styles for the
+   exact spec colors. Without these as variables, toggling dark mode had no
+   effect on those screens since inline styles always beat dark: classes. */
+:root {
+  --surface: #ffffff;
+  --surface-border: #ece6d8;
+  --surface-border-soft: #f0ebe0;
+  --text-primary: #1c1a17;
+  --text-muted: #9a9280;
+  --text-faint: #8a8474;
+  --page-bg: #f6f3ec;
+  --row-hover: #faf8f2;
+}
+.dark {
+  --surface: #161d27;
+  --surface-border: rgba(255,255,255,0.08);
+  --surface-border-soft: rgba(255,255,255,0.06);
+  --text-primary: #f3ede2;
+  --text-muted: #9aa0ac;
+  --text-faint: #8a8f9a;
+  --page-bg: #0d1218;
+  --row-hover: rgba(255,255,255,0.03);
 }

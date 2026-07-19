@@ -1,20 +1,20 @@
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-function authHeaders() {
-  const token = localStorage.getItem("authToken");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
+// Auth now lives in an HttpOnly cookie the browser manages automatically —
+// `credentials: "include"` tells fetch to send it (and accept new ones) even
+// though the frontend (Vercel) and backend (Render) are different domains.
+// Nothing here ever touches localStorage for the token; JavaScript literally
+// cannot read an HttpOnly cookie, which is the whole point (blocks XSS token theft).
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
-    headers: { ...(options.headers || {}), ...authHeaders() },
+    credentials: "include",
+    headers: { ...(options.headers || {}) },
   });
 
   if (res.status === 401) {
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("authUser");
-    window.location.href = "/";
+    localStorage.removeItem("authUser:v1");
+    if (window.location.pathname !== "/") window.location.href = "/";
     throw new Error("Session expired — please log in again");
   }
   return res;
@@ -33,6 +33,7 @@ async function parseOrThrow(res, fallbackMsg) {
 export async function register(name, email, password) {
   const res = await fetch(`${BASE_URL}/auth/register`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, email, password }),
   });
@@ -42,6 +43,7 @@ export async function register(name, email, password) {
 export async function login(email, password) {
   const res = await fetch(`${BASE_URL}/auth/login`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
@@ -51,15 +53,37 @@ export async function login(email, password) {
 export async function requestLoginOtp(email) {
   const res = await fetch(`${BASE_URL}/auth/request-login-otp`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
   });
   return parseOrThrow(res, "Could not send code");
 }
 
+export async function forgotPassword(email) {
+  const res = await fetch(`${BASE_URL}/auth/forgot-password`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  return parseOrThrow(res, "Could not send reset code");
+}
+
+export async function resetPassword(email, otp, newPassword) {
+  const res = await fetch(`${BASE_URL}/auth/reset-password`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, otp, new_password: newPassword }),
+  });
+  return parseOrThrow(res, "Could not reset password");
+}
+
 export async function verifyOtp(email, otp) {
   const res = await fetch(`${BASE_URL}/auth/verify-otp`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, otp }),
   });
@@ -69,6 +93,7 @@ export async function verifyOtp(email, otp) {
 export async function resendOtp(email) {
   const res = await fetch(`${BASE_URL}/auth/resend-otp`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
   });
@@ -78,10 +103,25 @@ export async function resendOtp(email) {
 export async function googleAuth(credential) {
   const res = await fetch(`${BASE_URL}/auth/google`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ credential }),
   });
   return parseOrThrow(res, "Google sign-in failed");
+}
+
+export async function logout() {
+  const res = await fetch(`${BASE_URL}/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
+  localStorage.removeItem("authUser:v1");
+  return parseOrThrow(res, "Logout failed");
+}
+
+export async function getMe() {
+  const res = await apiFetch("/auth/me");
+  return parseOrThrow(res, "Could not verify session");
 }
 
 export async function uploadAvatar(file) {
@@ -102,11 +142,6 @@ export function resolveAvatarUrl(avatarUrl) {
   if (!avatarUrl) return null;
   if (avatarUrl.startsWith("http")) return avatarUrl;
   return `${BASE_URL}/avatars/${avatarUrl}`;
-}
-
-export async function getMe() {
-  const res = await apiFetch("/auth/me");
-  return parseOrThrow(res, "Could not verify session");
 }
 
 // ---------- Uploads ----------
@@ -141,6 +176,15 @@ export async function generateAuto(payload) {
   return parseOrThrow(res, "Auto-generation failed");
 }
 
+export async function generateDiagramQuestion(payload) {
+  const res = await apiFetch("/generate/diagram", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseOrThrow(res, "Diagram question generation failed");
+}
+
 // ---------- Papers ----------
 export async function buildPaper(payload) {
   const res = await apiFetch("/paper/build", {
@@ -160,14 +204,65 @@ export async function buildPaperFromTemplate(payload) {
   return parseOrThrow(res, "Template-based paper build failed");
 }
 
+export async function buildUniversityPaper(payload) {
+  const res = await apiFetch("/paper/build-university", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseOrThrow(res, "University-format paper build failed");
+}
+
 export async function listPapers() {
   const res = await apiFetch("/papers");
   return parseOrThrow(res, "Could not load papers");
 }
 
 export function downloadPaperUrl(paperId) {
-  // Plain <a href> browser navigation, no auth header — backend leaves this route open.
+  // Plain <a href> browser navigation — the download route stays intentionally
+  // unauthenticated (no cookie needed) so a direct link always works.
   return `${BASE_URL}/paper/${paperId}/download`;
+}
+
+export function previewPaperUrl(paperId) {
+  return `${BASE_URL}/paper/${paperId}/preview`;
+}
+
+export async function getPaperDetail(paperId) {
+  const res = await apiFetch(`/papers/${paperId}`);
+  return parseOrThrow(res, "Could not load paper details");
+}
+
+// ---------- Paper templates ----------
+export async function listPaperTemplates() {
+  const res = await apiFetch("/paper-templates");
+  return parseOrThrow(res, "Could not load templates");
+}
+
+export async function savePaperTemplate(payload) {
+  const res = await apiFetch("/paper-templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseOrThrow(res, "Could not save template");
+}
+
+export async function deletePaperTemplate(id) {
+  const res = await apiFetch(`/paper-templates/${id}`, { method: "DELETE" });
+  return parseOrThrow(res, "Could not delete template");
+}
+
+// ---------- Similarity check ----------
+export async function checkSimilarity(threshold = 0.75) {
+  const res = await apiFetch(`/questions/similarity?threshold=${threshold}`);
+  return parseOrThrow(res, "Could not check similarity");
+}
+
+// ---------- MCQ export ----------
+export function exportMcqCsvUrl(ids) {
+  const params = ids && ids.length ? `?ids=${ids.join(",")}` : "";
+  return `${BASE_URL}/questions/export-mcq-csv${params}`;
 }
 
 export async function sharePaperEmail(paperId, to, message) {
@@ -190,13 +285,23 @@ export async function getActivity() {
   return parseOrThrow(res, "Could not load activity");
 }
 
-export async function searchQuestions({ topic, bloomLevel, search } = {}) {
+export async function searchQuestions({ topic, bloomLevel, search, ownerId } = {}) {
   const params = new URLSearchParams();
   if (topic) params.set("topic", topic);
   if (bloomLevel) params.set("bloom_level", bloomLevel);
   if (search) params.set("search", search);
+  if (ownerId) params.set("owner_id", ownerId);
   const res = await apiFetch(`/questions?${params.toString()}`);
   return parseOrThrow(res, "Could not load questions");
+}
+
+export async function updateQuestion(id, { question, answer }) {
+  const res = await apiFetch(`/questions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, answer }),
+  });
+  return parseOrThrow(res, "Could not save changes");
 }
 
 // ---------- Logo / template ----------
@@ -238,6 +343,31 @@ export async function adminListFeedback() {
 export async function adminListUsers() {
   const res = await apiFetch("/admin/users");
   return parseOrThrow(res, "Could not load users — admin access required");
+}
+
+// ---------- Co-teacher sharing ----------
+export async function inviteCoTeacher(email) {
+  const res = await apiFetch("/share/invite", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  return parseOrThrow(res, "Could not invite");
+}
+
+export async function listMyShares() {
+  const res = await apiFetch("/share/my-shares");
+  return parseOrThrow(res, "Could not load shares");
+}
+
+export async function revokeShare(id) {
+  const res = await apiFetch(`/share/${id}`, { method: "DELETE" });
+  return parseOrThrow(res, "Could not revoke");
+}
+
+export async function listSharedWithMe() {
+  const res = await apiFetch("/share/shared-with-me");
+  return parseOrThrow(res, "Could not load shared banks");
 }
 
 export async function adminReplyFeedback(feedbackId, message) {

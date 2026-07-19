@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import jwt
-from fastapi import Depends, HTTPException, Header
+from fastapi import Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -19,6 +19,15 @@ SECRET_KEY = os.getenv("JWT_SECRET", "qpaper-ai-dev-secret-do-not-use-in-product
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24 * 7  # 1 week — convenient for a demo, avoids re-login mid-viva
 OTP_EXPIRE_MINUTES = 10
+COOKIE_NAME = "qpaper_session"
+
+# Cookies need different settings for local http dev vs. deployed https:
+# - secure=True cookies are silently dropped by browsers over plain http
+# - cross-site cookies (Vercel <-> Render, different domains) need SameSite=None,
+#   which browsers only honor when Secure=True
+# Set COOKIE_SECURE=true in Render's env vars; leave unset locally.
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+COOKIE_SAMESITE = "none" if COOKIE_SECURE else "lax"
 
 
 def generate_otp() -> str:
@@ -55,11 +64,44 @@ def create_access_token(user_id: int, email: str) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
-    if not authorization or not authorization.startswith("Bearer "):
+def set_auth_cookie(response, token: str):
+    """Stores the session token in an HttpOnly cookie — JavaScript (and
+    therefore any XSS on the page) can never read it, unlike localStorage."""
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=TOKEN_EXPIRE_HOURS * 3600,
+        path="/",
+    )
+
+
+def clear_auth_cookie(response):
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+
+
+def _extract_token(request: Request, authorization: Optional[str]) -> Optional[str]:
+    # Cookie is the real mechanism now; Authorization header is kept as a
+    # fallback so nothing breaks for anyone with an old client still sending it.
+    cookie_token = request.cookies.get(COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.split(" ", 1)[1]
+    return None
+
+
+def get_current_user(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    token = _extract_token(request, authorization)
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    token = authorization.split(" ", 1)[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError:

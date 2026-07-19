@@ -40,6 +40,19 @@ Return ONLY a JSON array of objects. No preamble, no markdown fences.
 Format: [{{"question": "...", "answer": "...", "bloom_level": "..."}}, ...]
 """
 
+MCQ_PROMPT = """You are an experienced university exam-paper setter.
+
+Generate {count} unique {difficulty}-difficulty multiple-choice questions on the topic: "{topic}".
+
+Each question must have EXACTLY 4 options, with exactly ONE correct answer.
+Make the incorrect options plausible (not obviously wrong) — this should test real
+understanding, not just elimination. Write everything in {language}.
+
+Return ONLY a JSON array of objects. No preamble, no markdown fences.
+Format: [{{"question": "...", "options": ["...", "...", "...", "..."], "correct_option": "A", "answer": "brief explanation of why this is correct"}}, ...]
+The "correct_option" must be one of "A", "B", "C", "D", matching the 0-indexed position in "options".
+"""
+
 
 def _call_model(prompt: str, retries: int = 2, backoff_seconds: float = 1.5):
     """Wraps the Gemini call with retries — free-tier APIs occasionally throw
@@ -76,6 +89,40 @@ def _parse_items(raw_text: str):
         else:
             normalized.append({"question": str(item).strip(), "answer": "", "bloom_level": ""})
     return [i for i in normalized if i["question"]]
+
+
+def _parse_mcq_items(raw_text: str):
+    raw = raw_text.strip().replace("```json", "").replace("```", "").strip()
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+
+    normalized = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        options = item.get("options", [])
+        if not isinstance(options, list) or len(options) != 4:
+            continue  # malformed MCQ — skip rather than ship a broken question
+        correct = str(item.get("correct_option", "")).strip().upper()
+        if correct not in ("A", "B", "C", "D"):
+            continue
+        normalized.append({
+            "question": str(item.get("question", "")).strip(),
+            "options": [str(o).strip() for o in options],
+            "correct_option": correct,
+            "answer": str(item.get("answer", "")).strip(),
+        })
+    return [i for i in normalized if i["question"]]
+
+
+def generate_mcq_questions(topic: str, difficulty: str, count: int = 5, language: str = "English"):
+    """Generate `count` multiple-choice questions, each with 4 options and one
+    correct answer clearly marked."""
+    prompt = MCQ_PROMPT.format(topic=topic, difficulty=difficulty, count=count, language=language)
+    response = _call_model(prompt)
+    return _parse_mcq_items(response.text)[:count]
 
 
 def generate_questions(topic: str, bloom_level: str, marks: int, difficulty: str,
