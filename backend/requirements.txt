@@ -11,4 +11,3 @@ pydantic
 pyjwt
 google-auth
 slowapi
-qrcode[pil]

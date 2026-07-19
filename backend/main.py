@@ -161,7 +161,6 @@ class BuildPaperRequest(BaseModel):
     parent_paper_id: Optional[int] = None
     shuffle: bool = False
     watermark_text: Optional[str] = None
-    qr_content: Optional[str] = None
 
 
 class BuildFromTemplateRequest(BaseModel):
@@ -190,7 +189,6 @@ class BuildUniversityPaperRequest(BaseModel):
     parent_paper_id: Optional[int] = None
     shuffle: bool = False
     watermark_text: Optional[str] = None
-    qr_content: Optional[str] = None
 
 
 class FeedbackRequest(BaseModel):
@@ -820,14 +818,6 @@ def _maybe_shuffle(sections_payload: list, shuffle: bool) -> list:
     return sections_payload
 
 
-def _maybe_make_qr(qr_content: Optional[str], paper_id_hint) -> Optional[str]:
-    if not qr_content:
-        return None
-    from services.pdf_export import make_qr_image
-    path = os.path.join(GENERATED_DIR, f"qr_{paper_id_hint}.png")
-    return make_qr_image(qr_content, path)
-
-
 # ---------- Co-teacher sharing ----------
 @app.post("/share/invite")
 def invite_co_teacher(req: InviteCoTeacherRequest, db: Session = Depends(get_db),
@@ -911,14 +901,13 @@ def build_paper(req: BuildPaperRequest, db: Session = Depends(get_db),
 
     logo_path = os.path.join(LOGO_DIR, req.logo_filename) if req.logo_filename else None
     sections_payload = _maybe_shuffle(sections_payload, req.shuffle)
-    qr_path = _maybe_make_qr(req.qr_content, paper.id)
 
     output_path = os.path.join(GENERATED_DIR, f"paper_{paper.id}.pdf")
     build_pdf(
         output_path=output_path, institution=req.institution, course=req.course,
         duration=req.duration, max_marks=req.max_marks, instructions=req.instructions,
         sections=sections_payload, include_answers=req.include_answers, logo_path=logo_path,
-        watermark_text=req.watermark_text, qr_image_path=qr_path,
+        watermark_text=req.watermark_text,
     )
 
     return {"paper_id": paper.id, "download_url": f"/paper/{paper.id}/download"}
@@ -956,7 +945,6 @@ def build_university_paper(req: BuildUniversityPaperRequest, db: Session = Depen
 
     logo_path = os.path.join(LOGO_DIR, req.logo_filename) if req.logo_filename else None
     sections_payload = _maybe_shuffle(sections_payload, req.shuffle)
-    qr_path = _maybe_make_qr(req.qr_content, paper.id)
 
     output_path = os.path.join(GENERATED_DIR, f"paper_{paper.id}.pdf")
     build_university_pdf(
@@ -975,7 +963,6 @@ def build_university_paper(req: BuildUniversityPaperRequest, db: Session = Depen
         sections=sections_payload,
         logo_path=logo_path,
         watermark_text=req.watermark_text,
-        qr_image_path=qr_path,
     )
 
     return {"paper_id": paper.id, "download_url": f"/paper/{paper.id}/download"}

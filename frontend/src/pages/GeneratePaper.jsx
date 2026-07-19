@@ -61,7 +61,6 @@ export default function GeneratePaper() {
   const [includeAnswers, setIncludeAnswers] = useState(true);
   const [shuffle, setShuffle] = useState(false);
   const [watermarkText, setWatermarkText] = useState("");
-  const [qrContent, setQrContent] = useState("");
 
   const [institution, setInstitution] = useState("");
   const [course, setCourse] = useState("");
@@ -326,7 +325,7 @@ export default function GeneratePaper() {
           sections,
           include_answers: includeAnswers,
           parent_paper_id: parentPaperId,
-          shuffle, watermark_text: watermarkText || null, qr_content: qrContent || null,
+          shuffle, watermark_text: watermarkText || null,
         });
       } else if (outputMode === OUTPUT_MODES.UNIVERSITY) {
         result = await buildUniversityPaper({
@@ -345,7 +344,7 @@ export default function GeneratePaper() {
           sections,
           logo_filename: logoFilename || null,
           parent_paper_id: parentPaperId,
-          shuffle, watermark_text: watermarkText || null, qr_content: qrContent || null,
+          shuffle, watermark_text: watermarkText || null,
         });
       } else {
         result = await buildPaper({
@@ -359,7 +358,7 @@ export default function GeneratePaper() {
           include_answers: includeAnswers,
           logo_filename: logoFilename || null,
           parent_paper_id: parentPaperId,
-          shuffle, watermark_text: watermarkText || null, qr_content: qrContent || null,
+          shuffle, watermark_text: watermarkText || null,
         });
       }
       setDownloadUrl(downloadPaperUrl(result.paper_id));
@@ -877,9 +876,6 @@ export default function GeneratePaper() {
             </label>
             <input value={watermarkText} onChange={(e) => setWatermarkText(e.target.value)}
               placeholder="Watermark text (e.g. CONFIDENTIAL) — optional"
-              className="w-full border border-inkscale-100 dark:border-white/10 dark:bg-inkscale-700 dark:text-white rounded-lg px-3 py-2 text-sm" />
-            <input value={qrContent} onChange={(e) => setQrContent(e.target.value)}
-              placeholder="QR code content (URL/text) — optional"
               className="w-full border border-inkscale-100 dark:border-white/10 dark:bg-inkscale-700 dark:text-white rounded-lg px-3 py-2 text-sm" />
 
             <button type="button"

@@ -13,9 +13,9 @@ from reportlab.lib import colors
 from services.diagram_generator import draw_diagram
 
 
-def _make_page_decorator(watermark_text=None, qr_image_path=None):
+def _make_page_decorator(watermark_text=None):
     """Returns an onPage callback for SimpleDocTemplate that stamps a
-    diagonal watermark and/or a small QR code onto every page."""
+    diagonal watermark onto every page."""
     def _decorate(canvas, doc):
         canvas.saveState()
         if watermark_text:
@@ -25,23 +25,7 @@ def _make_page_decorator(watermark_text=None, qr_image_path=None):
             canvas.rotate(45)
             canvas.drawCentredString(0, 0, watermark_text)
         canvas.restoreState()
-        if qr_image_path and os.path.exists(qr_image_path):
-            try:
-                # Top-right, clear of the header text and safely away from the
-                # table below it — bottom-right previously collided with the
-                # answer table's border since table height varies per paper.
-                canvas.drawImage(qr_image_path, doc.pagesize[0] - 24 * mm, doc.pagesize[1] - 24 * mm,
-                                  width=14 * mm, height=14 * mm, mask="auto")
-            except Exception:
-                pass
     return _decorate
-
-
-def make_qr_image(content: str, output_path: str):
-    import qrcode
-    img = qrcode.make(content)
-    img.save(output_path)
-    return output_path
 
 styles = getSampleStyleSheet()
 title_style = ParagraphStyle("Title2", parent=styles["Title"], alignment=TA_CENTER)
@@ -100,7 +84,6 @@ def build_pdf(
     include_answers: bool = False,
     logo_path: str = None,
     watermark_text: str = None,
-    qr_image_path: str = None,
 ):
     doc = SimpleDocTemplate(output_path, pagesize=A4,
                              topMargin=20 * mm, bottomMargin=20 * mm)
@@ -148,7 +131,7 @@ def build_pdf(
                     ans = q.get("answer") or "(no model answer generated)"
                 story.append(Paragraph(f"<b>A{i}.</b> {ans}", answer_style))
 
-    decorator = _make_page_decorator(watermark_text, qr_image_path)
+    decorator = _make_page_decorator(watermark_text)
     doc.build(story, onFirstPage=decorator, onLaterPages=decorator)
     return output_path
 
@@ -169,7 +152,6 @@ def build_university_pdf(
     sections: list,           # [{"name": "Section-A", "questions": [{...}]}]
     logo_path: str = None,
     watermark_text: str = None,
-    qr_image_path: str = None,
 ):
     """Matches the common Indian-university mid-term/end-semester layout:
     Roll No line, metadata block, then a Q.No / Question / Marks / CO-L table
@@ -264,6 +246,6 @@ def build_university_pdf(
                     ans = q.get("answer") or "(no model answer generated)"
                 story.append(Paragraph(f"<b>A{i}.</b> {ans}", answer_style))
 
-    decorator = _make_page_decorator(watermark_text, qr_image_path)
+    decorator = _make_page_decorator(watermark_text)
     doc.build(story, onFirstPage=decorator, onLaterPages=decorator)
     return output_path
