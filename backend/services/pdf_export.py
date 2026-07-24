@@ -9,8 +9,31 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from services.diagram_generator import draw_diagram
+
+# ---------- Hindi/Devanagari font support ----------
+# Falls back to the default Helvetica if the font files aren't present, so
+# English-only setups keep working without needing to download anything.
+FONT_DIR = os.path.join(os.path.dirname(__file__), "..", "fonts")
+BODY_FONT = "Helvetica"
+BODY_FONT_BOLD = "Helvetica-Bold"
+try:
+    pdfmetrics.registerFont(TTFont("NotoDevanagari", os.path.join(FONT_DIR, "NotoSansDevanagari-Regular.ttf")))
+    pdfmetrics.registerFont(TTFont("NotoDevanagari-Bold", os.path.join(FONT_DIR, "NotoSansDevanagari-Bold.ttf")))
+    pdfmetrics.registerFontFamily(
+        "NotoDevanagari", normal="NotoDevanagari", bold="NotoDevanagari-Bold",
+        italic="NotoDevanagari", boldItalic="NotoDevanagari-Bold",
+    )
+    # Noto Sans Devanagari also covers standard Latin characters, so this one
+    # font handles English and Hindi content in the same document — no need
+    # to pick a font per language.
+    BODY_FONT = "NotoDevanagari"
+    BODY_FONT_BOLD = "NotoDevanagari-Bold"
+except Exception:
+    pass
 
 
 def _make_page_decorator(watermark_text=None):
@@ -19,7 +42,7 @@ def _make_page_decorator(watermark_text=None):
     def _decorate(canvas, doc):
         canvas.saveState()
         if watermark_text:
-            canvas.setFont("Helvetica-Bold", 60)
+            canvas.setFont(BODY_FONT_BOLD, 60)
             canvas.setFillColorRGB(0.6, 0.6, 0.6, alpha=0.18)
             canvas.translate(doc.pagesize[0] / 2, doc.pagesize[1] / 2)
             canvas.rotate(45)
@@ -28,13 +51,13 @@ def _make_page_decorator(watermark_text=None):
     return _decorate
 
 styles = getSampleStyleSheet()
-title_style = ParagraphStyle("Title2", parent=styles["Title"], alignment=TA_CENTER)
-center_style = ParagraphStyle("Center", parent=styles["Normal"], alignment=TA_CENTER)
-section_style = ParagraphStyle("Section", parent=styles["Heading2"], spaceBefore=14)
-question_style = ParagraphStyle("Question", parent=styles["Normal"], spaceAfter=8, leftIndent=10)
-option_style = ParagraphStyle("Option", parent=styles["Normal"], spaceAfter=2, leftIndent=24)
-answer_style = ParagraphStyle("Answer", parent=styles["Normal"], spaceAfter=10, leftIndent=10, textColor="#334155")
-cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontSize=9, leading=12)
+title_style = ParagraphStyle("Title2", parent=styles["Title"], alignment=TA_CENTER, fontName=BODY_FONT_BOLD)
+center_style = ParagraphStyle("Center", parent=styles["Normal"], alignment=TA_CENTER, fontName=BODY_FONT)
+section_style = ParagraphStyle("Section", parent=styles["Heading2"], spaceBefore=14, fontName=BODY_FONT_BOLD)
+question_style = ParagraphStyle("Question", parent=styles["Normal"], spaceAfter=8, leftIndent=10, fontName=BODY_FONT)
+option_style = ParagraphStyle("Option", parent=styles["Normal"], spaceAfter=2, leftIndent=24, fontName=BODY_FONT)
+answer_style = ParagraphStyle("Answer", parent=styles["Normal"], spaceAfter=10, leftIndent=10, textColor="#334155", fontName=BODY_FONT)
+cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontSize=9, leading=12, fontName=BODY_FONT)
 
 
 def _question_flowables(q: dict, number, include_answer_inline=False):
@@ -163,7 +186,7 @@ def build_university_pdf(
     story = []
 
     # ---- Header ----
-    header_style = ParagraphStyle("Header", parent=styles["Normal"], fontSize=9)
+    header_style = ParagraphStyle("Header", parent=styles["Normal"], fontSize=9, fontName=BODY_FONT)
     story.append(Paragraph("Roll No: ____________________", header_style))
     story.append(Spacer(1, 4))
 
@@ -189,9 +212,10 @@ def build_university_pdf(
     ]
     meta_table = Table(meta_rows, colWidths=[32 * mm, 60 * mm, 34 * mm, 52 * mm])
     meta_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), BODY_FONT),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (0, -1), BODY_FONT_BOLD),
+        ("FONTNAME", (2, 0), (2, -1), BODY_FONT_BOLD),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
     ]))
@@ -221,7 +245,8 @@ def build_university_pdf(
         table.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#94a3b8")),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 0), (-1, 0), BODY_FONT_BOLD),
+            ("FONTNAME", (0, 1), (-1, -1), BODY_FONT),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("ALIGN", (0, 0), (0, -1), "CENTER"),

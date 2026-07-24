@@ -559,11 +559,6 @@ export default function GeneratePaper() {
         {error && <p className="text-red-600 text-sm">{error}</p>}
         {autoProgress && !error && <p className="text-burgundy text-sm">{autoProgress}</p>}
 
-        <p className="text-xs text-inkscale-300">
-          {t("generatingIn")} <span className="font-medium text-inkscale-500 dark:text-inkscale-200">{generationLanguage}</span>
-          {" — "}<Link to="/settings" className="text-burgundy underline">{t("changeInSettings")}</Link>.
-        </p>
-
         <button type="button"
           onClick={mode === MODES.SINGLE ? handleGenerateSingle : handleGenerateAuto}
           disabled={loading || (mode === MODES.SINGLE ? !topic : !selectedTopics.length)}

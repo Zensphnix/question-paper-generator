@@ -48,6 +48,16 @@ conn.commit()
 print("  done")
 
 cur.execute("""
+CREATE TABLE IF NOT EXISTS announcements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message TEXT NOT NULL,
+    created_by_id INTEGER,
+    created_at DATETIME
+)
+""")
+conn.commit()
+
+cur.execute("""
 CREATE TABLE IF NOT EXISTS shared_access (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_id INTEGER NOT NULL,
@@ -63,6 +73,21 @@ add_column("users", "otp_code", "TEXT")
 add_column("users", "otp_expires_at", "DATETIME")
 add_column("users", "auth_provider", "TEXT DEFAULT 'password'")
 add_column("users", "avatar_url", "TEXT")
+add_column("users", "is_suspended", "BOOLEAN DEFAULT 0")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS app_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    maintenance_mode BOOLEAN DEFAULT 0,
+    allow_self_signup BOOLEAN DEFAULT 1,
+    bilingual_enabled BOOLEAN DEFAULT 1,
+    daily_rate_limit INTEGER DEFAULT 500
+)
+""")
+cur.execute("SELECT COUNT(*) FROM app_settings")
+if cur.fetchone()[0] == 0:
+    cur.execute("INSERT INTO app_settings (maintenance_mode, allow_self_signup, bilingual_enabled, daily_rate_limit) VALUES (0, 1, 1, 500)")
+conn.commit()
 add_column("questions", "owner_id", "INTEGER")
 add_column("questions", "set_label", "TEXT")
 add_column("questions", "question_type", "TEXT DEFAULT 'short_answer'")
@@ -75,6 +100,7 @@ add_column("papers", "parent_paper_id", "INTEGER")
 add_column("papers", "version", "INTEGER DEFAULT 1")
 add_column("feedback", "reply", "TEXT")
 add_column("feedback", "reply_at", "DATETIME")
+add_column("feedback", "status", "TEXT DEFAULT 'open'")
 
 print("\nCreating paper_templates table if missing...")
 cur.execute("""

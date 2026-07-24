@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { LazyMotion, domMax, MotionConfig } from "framer-motion";
 import App from "./App.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import GlobalErrorHandler from "./components/GlobalErrorHandler.jsx";
 import { LanguageProvider } from "./context/LanguageContext.jsx";
 import "./index.css";
 
@@ -24,7 +26,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <MotionConfig reducedMotion="user">
         <BrowserRouter>
           <LanguageProvider>
-            <App />
+            <ErrorBoundary>
+              <App />
+            </ErrorBoundary>
+            <GlobalErrorHandler />
           </LanguageProvider>
         </BrowserRouter>
       </MotionConfig>

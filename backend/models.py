@@ -12,10 +12,23 @@ class User(Base):
     password = Column(String, nullable=False)  # hashed (PBKDF2); random+unusable for Google-only accounts
     role = Column(String, default="teacher")   # teacher | admin
     is_verified = Column(Boolean, default=False)
+    is_suspended = Column(Boolean, default=False)
     otp_code = Column(String, nullable=True)
     otp_expires_at = Column(DateTime, nullable=True)
     auth_provider = Column(String, default="password")  # "password" | "google"
     avatar_url = Column(String, nullable=True)  # filename (local upload) or full URL (e.g. Google photo)
+
+
+class AppSettings(Base):
+    """Single-row table of platform-wide settings the owner can toggle from
+    the admin panel. Enforced for real (maintenance mode blocks generation,
+    self-signup gate blocks registration), not just stored for display."""
+    __tablename__ = "app_settings"
+    id = Column(Integer, primary_key=True, index=True)
+    maintenance_mode = Column(Boolean, default=False)
+    allow_self_signup = Column(Boolean, default=True)
+    bilingual_enabled = Column(Boolean, default=True)
+    daily_rate_limit = Column(Integer, default=500)
 
 
 class Subject(Base):
@@ -103,6 +116,16 @@ class Upload(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Announcement(Base):
+    """A message the owner broadcasts to every user at once — shows up in
+    everyone's notification bell alongside their personal activity."""
+    __tablename__ = "announcements"
+    id = Column(Integer, primary_key=True, index=True)
+    message = Column(Text, nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class SharedAccess(Base):
     __tablename__ = "shared_access"
     id = Column(Integer, primary_key=True, index=True)
@@ -119,4 +142,5 @@ class Feedback(Base):
     message = Column(Text, nullable=False)
     reply = Column(Text, nullable=True)
     reply_at = Column(DateTime, nullable=True)
+    status = Column(String, default="open")  # open | resolved — independent of whether it's been replied to
     created_at = Column(DateTime, default=datetime.utcnow)

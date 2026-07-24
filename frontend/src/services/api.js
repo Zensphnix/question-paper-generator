@@ -1,3 +1,5 @@
+import { reportError } from "./errorBus.js";
+
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 // Auth now lives in an HttpOnly cookie the browser manages automatically —
@@ -5,12 +7,26 @@ const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 // though the frontend (Vercel) and backend (Render) are different domains.
 // Nothing here ever touches localStorage for the token; JavaScript literally
 // cannot read an HttpOnly cookie, which is the whole point (blocks XSS token theft).
+
 async function apiFetch(path, options = {}) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    credentials: "include",
-    headers: { ...(options.headers || {}) },
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      credentials: "include",
+      headers: { ...(options.headers || {}) },
+    });
+  } catch (networkErr) {
+    // fetch() itself throws (not a 4xx/5xx response) when the server can't
+    // be reached at all — backend not running, DNS failure, CORS block, etc.
+    // This is exactly the "Failed to fetch" error hit repeatedly during
+    // local development when the backend terminal wasn't running.
+    reportError({
+      message: "Couldn't reach the server. Check your connection, or the backend may be down.",
+      source: "network",
+    });
+    throw new Error("Couldn't reach the server. Check your connection, or the backend may be down.");
+  }
 
   if (res.status === 401) {
     localStorage.removeItem("authUser:v1");
@@ -343,6 +359,67 @@ export async function adminListFeedback() {
 export async function adminListUsers() {
   const res = await apiFetch("/admin/users");
   return parseOrThrow(res, "Could not load users — admin access required");
+}
+
+export async function adminToggleUserSuspension(userId, isSuspended) {
+  const res = await apiFetch(`/admin/users/${userId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_suspended: isSuspended }),
+  });
+  return parseOrThrow(res, "Could not update user");
+}
+
+export async function adminListPapers() {
+  const res = await apiFetch("/admin/papers");
+  return parseOrThrow(res, "Could not load papers — admin access required");
+}
+
+export async function adminDeletePaper(paperId) {
+  const res = await apiFetch(`/admin/papers/${paperId}`, { method: "DELETE" });
+  return parseOrThrow(res, "Could not delete paper");
+}
+
+export async function adminGetSettings() {
+  const res = await apiFetch("/admin/settings");
+  return parseOrThrow(res, "Could not load settings — admin access required");
+}
+
+export async function adminUpdateSettings(payload) {
+  const res = await apiFetch("/admin/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseOrThrow(res, "Could not save settings");
+}
+
+export async function adminOverview() {
+  const res = await apiFetch("/admin/overview");
+  return parseOrThrow(res, "Could not load overview — admin access required");
+}
+
+export async function adminCreateAnnouncement(message) {
+  const res = await apiFetch("/admin/announcements", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  return parseOrThrow(res, "Could not send announcement");
+}
+
+export async function adminListAnnouncements() {
+  const res = await apiFetch("/admin/announcements");
+  return parseOrThrow(res, "Could not load announcements");
+}
+
+export async function adminUpdateFeedbackStatus(feedbackId, status) {
+  const res = await apiFetch(`/admin/feedback/${feedbackId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  return parseOrThrow(res, "Could not update ticket status");
 }
 
 // ---------- Co-teacher sharing ----------

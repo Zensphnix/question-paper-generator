@@ -31,6 +31,25 @@ function Page({ children }) {
   );
 }
 
+function OwnerApp({ handleLogout }) {
+  // Owner accounts get a standalone admin console — no teacher-facing
+  // sidebar, no other routes reachable. Admin.jsx already renders its own
+  // full-page layout, so it isn't wrapped in anything here.
+  return (
+    <div>
+      <div className="flex justify-end px-6 pt-4">
+        <button
+          onClick={handleLogout}
+          className="text-xs font-medium text-inkscale-400 hover:text-burgundy underline"
+        >
+          Log out
+        </button>
+      </div>
+      <Admin />
+    </div>
+  );
+}
+
 function AuthenticatedApp({ user, darkMode, setDarkMode, handleLogout, handleUserUpdate }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
@@ -142,6 +161,8 @@ export default function App() {
             </div>
           ) : !user ? (
             <Login onAuth={setUser} />
+          ) : user.role === "admin" ? (
+            <OwnerApp handleLogout={handleLogout} />
           ) : (
             <AuthenticatedApp
               user={user}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, m } from "framer-motion";
-import { Search, Bell, Settings, LogOut, FileText, FolderPlus, FileQuestion, Menu, CornerDownRight } from "lucide-react";
+import { Search, Bell, Settings, LogOut, FileText, FolderPlus, FileQuestion, Menu, CornerDownRight, Megaphone } from "lucide-react";
 import { getActivity, searchQuestions, listPapers, resolveAvatarUrl } from "../services/api.js";
 import { useLanguage } from "../context/useLanguage.js";
 
@@ -205,16 +205,18 @@ export default function Topbar({ title, subtitle, user, onLogout, onMenuClick })
                     <p className="text-sm text-inkscale-300 px-4 py-6 text-center">{t("nothingYet")}</p>
                   )}
                   {activity.map((a) => (
-                    <div key={a.id} className={`flex items-start gap-2.5 px-4 py-2.5 hover:bg-inkscale-50 dark:hover:bg-white/5 ${a.type === "reply" ? "bg-burgundy/5/60 dark:bg-burgundy/5" : ""}`}>
+                    <div key={a.id} className={`flex items-start gap-2.5 px-4 py-2.5 hover:bg-inkscale-50 dark:hover:bg-white/5 ${a.type === "reply" ? "bg-burgundy/5/60 dark:bg-burgundy/5" : a.type === "announcement" ? "bg-gold/10 dark:bg-gold/10" : ""}`}>
                       {a.type === "reply" ? (
                         <CornerDownRight size={15} className="text-burgundy mt-0.5 shrink-0" />
                       ) : a.type === "paper" ? (
                         <FolderPlus size={15} className="text-burgundy mt-0.5 shrink-0" />
+                      ) : a.type === "announcement" ? (
+                        <Megaphone size={15} className="text-gold mt-0.5 shrink-0" />
                       ) : (
                         <FileText size={15} className="text-emerald-500 mt-0.5 shrink-0" />
                       )}
                       <div className="min-w-0">
-                        <p className="text-xs text-inkscale-600 dark:text-inkscale-200 truncate">{a.text}</p>
+                        <p className={`text-xs truncate ${a.type === "announcement" ? "text-inkscale-800 dark:text-white font-medium" : "text-inkscale-600 dark:text-inkscale-200"}`}>{a.text}</p>
                         <p className="text-[11px] text-inkscale-300">{timeAgo(a.timestamp)}</p>
                       </div>
                     </div>
